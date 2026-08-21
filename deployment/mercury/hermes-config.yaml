@@ -1,0 +1,28 @@
+# Sanitized HVE Mercury overlay.
+# Do not put credentials, tokens, or personal data in this file.
+model:
+  provider: custom
+  default: /opt/mercury/models/qwen2.5-3b-instruct-q4_k_m.gguf
+  base_url: http://127.0.0.1:8089/v1
+
+database:
+  journal_mode: wal
+
+runtime:
+  nofile_soft_limit: 4096
+
+agent:
+  max_turns: 10
+  reasoning_effort: medium
+  verbose: false
+
+custom_providers:
+  - name: Mercury Qwen2.5-3B (8K)
+    base_url: http://127.0.0.1:8089/v1
+    model: /opt/mercury/models/qwen2.5-3b-instruct-q4_k_m.gguf
+    models:
+      /opt/mercury/models/qwen2.5-3b-instruct-q4_k_m.gguf:
+        context_length: 8192
+
+smart_model_routing:
+  enabled: false

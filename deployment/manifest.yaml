@@ -1,0 +1,35 @@
+schema_version: 1
+project: hve-life-os
+release_channel: alpha
+
+upstream:
+  name: nous-hermes-agent
+  repository: https://github.com/NousResearch/hermes-agent.git
+  commit: a871948d8d4b0f774d4ec40467bab1078a9f28d5
+  source_note: Mercury currently has one local context-floor compatibility change.
+
+model:
+  name: qwen2.5-3b-instruct
+  format: gguf
+  quantization: Q4_K_M
+  context_tokens: 8192
+  backend: llama.cpp
+  endpoint: http://127.0.0.1:8089/v1
+  artifact_path: /opt/mercury/models/qwen2.5-3b-instruct-q4_k_m.gguf
+  checksum: pending
+
+targets:
+  mercury:
+    status: alpha
+    architecture: aarch64
+    minimum_ram_gb: 8
+    preferred_ram_gb: 16
+  ubuntu-windows:
+    status: planned
+  macos:
+    status: planned
+
+overlay:
+  context_floor_env: HERMES_MINIMUM_CONTEXT_LENGTH
+  context_floor_value: 8192
+  system_manager: systemd
