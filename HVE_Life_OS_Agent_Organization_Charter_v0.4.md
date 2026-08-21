@@ -1,11 +1,11 @@
-# HVE Life OS Agent Organization Charter v0.3
+# HVE Life OS Agent Organization Charter v0.4
 
 **Document type:** Agent communications charter  
 **Program:** HVE Life OS Alpha  
 **Owner:** Human Value Exchange  
-**Date:** 2026-08-12  
+**Date:** 2026-08-21
 **Deployment target:** Mercury alpha sovereignty node  
-**Version note:** v0.3 aligns the five-pillar language to canonical HVE wording: Time Wealth, Physical Wealth, Mental Wealth, Social Wealth, and Financial Wealth. Mental Wealth includes mental health, self-awareness, knowledge, wisdom, purpose, and inner operating capacity.
+**Version note:** v0.4 clarifies architecture authority, Hermes-Coder deployment gates, bounded coding loops, sources of truth, security rules, and the alpha definition of done.
 
 ## 1. Mission
 
@@ -77,6 +77,10 @@ If the answer is no, reconsider the dependency.
 
 ### 5.2 Luna - Head Technical Architect
 
+Luna is the designated HVE technical architecture role for this program. The
+role is responsible for architecture and delivery planning, regardless of
+which approved technical agent is operating it.
+
 **Primary accountability:** Convert business intent into buildable technical architecture.
 
 **Owns:**
@@ -117,7 +121,7 @@ If the answer is no, reconsider the dependency.
 - Automation scripts
 - Deployment packages
 - Operational runbooks
-- Mercury deployment execution
+- Approved Mercury deployment execution
 
 **Does not own:**
 
@@ -125,6 +129,7 @@ If the answer is no, reconsider the dependency.
 - Architecture redesign
 - Business requirements
 - Unapproved scope expansion
+- Production changes without an approval gate
 
 **Primary question:** Does it work?
 
@@ -175,12 +180,38 @@ Mercury is not an agent. Mercury is the proving ground.
 2. Luna converts approved direction into technical architecture and build plans.
 3. M365 Copilot and Luna review architecture alignment.
 4. Hermes-Coder writes code from the approved technical plan.
-5. Hermes-Coder deploys to Mercury.
-6. Mercury runs the alpha build.
-7. Hans validates on Mercury.
-8. Lessons learned flow back to M365 Copilot and Luna.
-9. The next iteration begins.
+5. Hermes-Coder runs the required tests and prepares a deployment report.
+6. Hans approves consequential or production deployment.
+7. Hermes-Coder deploys the approved build to Mercury.
+8. Mercury runs the alpha build.
+9. Hans validates on Mercury.
+10. Lessons learned flow back to M365 Copilot and Luna.
+11. The next iteration begins.
 ```
+
+## 8.1 Bounded Hermes-Coder Loop
+
+Hermes-Coder may use `/loop` for iterative implementation, but every loop must
+be bounded by an explicit job brief:
+
+```text
+Objective:
+Files and services in scope:
+Tests required:
+Acceptance criteria:
+Forbidden changes:
+Stop condition:
+```
+
+The standard loop is:
+
+```text
+Inspect -> implement -> test -> repair -> report
+```
+
+Hermes-Coder must stop and escalate when it encounters an architecture
+conflict, an unapproved scope change, a destructive operation, a missing
+credential, or a failed deployment gate.
 
 ## 8. Communication Protocol
 
@@ -220,6 +251,17 @@ Mercury is not an agent. Mercury is the proving ground.
 - Deployment results
 - User feedback from Hans
 
+## 8.2 Sources of Truth
+
+- **GitHub repository:** versioned code, approved documentation, and release history
+- **Architecture decision records:** technical authority for system boundaries and interfaces
+- **SQLite:** structured application facts and state
+- **Markdown files:** portable knowledge, requirements, and operating documentation
+- **Mercury runtime:** deployment, health, performance, and usability evidence
+
+No generated cache, agent memory, or external service may become the sole source
+of truth for user data or system configuration.
+
 ## 9. Escalation Rules
 
 - If Hermes-Coder encounters an architecture conflict, escalate to Luna.
@@ -257,6 +299,29 @@ Advanced dashboards
 
 Optional modules may add capability, but they must not become the source of truth.
 
+## 10.1 Security and Deployment Rules
+
+1. Never commit secrets, tokens, private keys, or personal data to Git.
+2. Hermes-Coder uses least-privilege SSH and service accounts on Mercury.
+3. Production services must be managed by explicit systemd units or an
+   equivalent auditable supervisor.
+4. Remote access must be authenticated and restricted to the required
+   interfaces.
+5. Hermes-Coder must not use unrestricted `sudo` or bypass deployment gates.
+6. Every deployment must have a tested rollback path and a post-deployment
+   health check.
+
+## 10.2 Definition of Done
+
+An alpha feature is complete only when it has:
+
+- Implemented code and focused tests
+- Updated user or operator documentation
+- A repeatable Mercury deployment procedure
+- A successful health check on Mercury
+- Backup and rollback instructions
+- A concise implementation report identifying risks and follow-up work
+
 ## 11. Mercury Alpha Rule
 
 If a feature cannot run on Mercury, it is not part of the alpha core.
@@ -285,6 +350,11 @@ Deliver a working HVE Life OS alpha on Mercury that demonstrates:
 - Simple dashboard or report output
 - Deployment repeatability
 - Evidence that the system can survive without cloud dependency
+
+The first milestone must remain deliberately small: establish the local
+knowledge files, SQLite facts store, one Hermes interaction path, a minimal
+report or dashboard output, and repeatable Mercury deployment before adding
+optional integrations.
 
 ## 14. Closing Statement
 
