@@ -1,0 +1,51 @@
+[Unit]
+Description=HVE Life OS — Five-Wealth local service (Mercury alpha)
+After=network.target
+PartOf=mercury-llama.service
+Documentation=file:///home/humanvalueexchange/workspaces/hvelifeospoc/docs/runbook-mercury.md
+
+[Service]
+Type=simple
+User=hve
+Group=hve
+WorkingDirectory=/opt/hve/current
+# D7=B: loopback-only service (config validates host).
+EnvironmentFile=-/home/hve/.hve/env
+# Standard PATH so PATH discovery and /usr/bin/env work for the unprivileged
+# `hve` user (item 4: the HVE_HERMES_BIN pin also lives in this EnvironmentFile
+# for the agent path — see docs/runbook-mercury.md for the exact value on
+# Mercury; the PATH declaration is the fallback that makes the documented
+# "put hermes on PATH" pin functional).
+Environment=PATH=/home/hve/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=HVE_HOME=/home/hve/.hve
+Environment=HVE_DB_PATH=/home/hve/.hve/data/hve.db
+Environment=HVE_KNOWLEDGE_DIR=/home/hve/.hve/knowledge
+Environment=HVE_REPORTS_DIR=/home/hve/.hve/reports
+Environment=HVE_BACKUPS_DIR=/home/hve/.hve/backups
+Environment=PYTHONPATH=/opt/hve/current
+Environment=HVE_HTTP_HOST=127.0.0.1
+Environment=HVE_HTTP_PORT=8090
+# D3=B: loopback-only report/health service on 8090.
+# HVE_HERMES_BIN is intentionally NOT set with a hard-coded account path here.
+# It is supplied per-host via the EnvironmentFile above (see runbook) so the
+# unit stays portable across Mercury/dev boxes. The code-side resolver
+# (hve/agent/ask.py::_find_hermes) honors the pin, PATH, or a documented
+# fallback in that order.
+ExecStart=/usr/bin/python3 -m hve.serve.loop
+# Type=simple has no supervisor process to receive SIGHUP. A
+# misconfigured ExecReload would SIGKILL PID 1 on the first
+# `systemctl reload hve-lifeos`. Remove it until we have a long-running
+# process with a reload handler (the report/agent path is HTTP, not
+# in-process, so reload is a no-op anyway).
+#ExecReload=/bin/kill -HUP $MAINPID   # removed: Type=simple cannot handle HUP
+Restart=on-failure
+RestartSec=5s
+# Safety: never allow the bind host to be widened at runtime.
+NoNewPrivileges=true
+ProtectHome=false
+ProtectSystem=strict
+ReadWritePaths=/home/hve/.hve
+# Loopback bind only (enforced in code, re-asserted here).
+
+[Install]
+WantedBy=multi-user.target

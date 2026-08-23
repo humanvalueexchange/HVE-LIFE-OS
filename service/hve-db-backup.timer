@@ -1,0 +1,13 @@
+[Unit]
+Description=HVE Life OS — daily SQLite backup timer (D10=B)
+Requires=hve-db-backup.service
+After=network.target
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+AccuracySec=1h
+Unit=hve-db-backup.service
+
+[Install]
+WantedBy=timers.target

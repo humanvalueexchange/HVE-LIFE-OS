@@ -1,0 +1,29 @@
+[Unit]
+Description=HVE Life OS — hourly idempotent report regeneration (D9=B)
+After=network.target
+PartOf=hve-lifeos.service
+
+[Service]
+Type=oneshot
+User=hve
+Group=hve
+WorkingDirectory=/opt/hve/current
+EnvironmentFile=-/home/hve/.hve/env
+Environment=PATH=/home/hve/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=HVE_HOME=/home/hve/.hve
+Environment=HVE_DB_PATH=/home/hve/.hve/data/hve.db
+Environment=HVE_KNOWLEDGE_DIR=/home/hve/.hve/knowledge
+Environment=HVE_REPORTS_DIR=/home/hve/.hve/reports
+Environment=HVE_BACKUPS_DIR=/home/hve/.hve/backups
+Environment=PYTHONPATH=/opt/hve/current
+# Idempotent path: generate skips rewrites when content is unchanged.
+ExecStart=/usr/bin/python3 -m hve report generate
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+ProtectHome=false
+ProtectSystem=strict
+ReadWritePaths=/home/hve/.hve
+
+[Install]
+WantedBy=multi-user.target

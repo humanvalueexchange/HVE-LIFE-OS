@@ -1,0 +1,68 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+build/
+.venv/
+.venv-*/
+venv/
+.env
+.env.*
+
+# Test / tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+dist/
+
+# HVE local runtime data. The repository ships the code + placeholder
+# knowledge structure, but NEVER the operator's personal data (D5=A,
+# charter 10.1 rule 2 — personal data does not go into the repo).
+#
+# These are created under ~/.hve on the target machine. Locally, if a
+# developer points HVE_HOME inside the repo (e.g. for quick experiments),
+# the artifacts below are treated as local, private, and must not be
+# committed.
+hve.db
+hve.db-wal
+hve.db-shm
+# SQLite data artifacts (any db file + sidecars). This does NOT touch
+# the schema DDL, which is a .sql file under hve/migrations/.
+*.sqlite
+*.sqlite3
+*.db
+*.db-wal
+*.db-shm
+*.wal
+*.shm
+# Generated / rendered reports.
+reports/
+report.md
+report.html
+# Personal knowledge. The six files under knowledge_base/ are the
+# committed placeholders; concrete personal artifacts are excluded.
+# We do NOT ignore the placeholder files that belong in Git.
+knowledge/**/*.md
+knowledge_base/personal*/
+knowledge_base/**/personal*
+# A developer-local ~/.hve mirrored into the repo, if any.
+.hve/
+# Local Hermes state (runtime, sessions, cache) — never in Git.
+.hermes/
+*.hermes-state
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+
+# Service runtime
+service/logs/
+service/run/

@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hve"
+version = "0.1.0"
+description = "HVE Life OS — local-first Personal Sovereignty Operating System (Mercury alpha)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Proprietary" }
+authors = [{ name = "Human Value Exchange" }]
+dependencies = []
+
+[project.scripts]
+hve = "hve.cli:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.setuptools.packages.find]
+include = ["hve*"]
+
+[tool.setuptools.package-data]
+hve = ["migrations/*.sql"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"

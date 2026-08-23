@@ -1,0 +1,14 @@
+[Unit]
+Description=HVE Life OS — hourly report timer (D9=B)
+Requires=hve-report.service
+After=network.target
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+AccuracySec=1m
+# Do not run if the previous instance is still going.
+Unit=hve-report.service
+
+[Install]
+WantedBy=timers.target

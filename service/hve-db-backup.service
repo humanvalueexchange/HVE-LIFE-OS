@@ -1,0 +1,29 @@
+[Unit]
+Description=HVE Life OS — periodic SQLite backup (D10=B)
+After=network.target
+Before=hve-lifeos.service
+
+[Service]
+Type=oneshot
+User=hve
+Group=hve
+WorkingDirectory=/opt/hve/current
+EnvironmentFile=-/home/hve/.hve/env
+Environment=PATH=/home/hve/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=HVE_HOME=/home/hve/.hve
+Environment=HVE_DB_PATH=/home/hve/.hve/data/hve.db
+Environment=HVE_KNOWLEDGE_DIR=/home/hve/.hve/knowledge
+Environment=HVE_REPORTS_DIR=/home/hve/.hve/reports
+Environment=HVE_BACKUPS_DIR=/home/hve/.hve/backups
+Environment=PYTHONPATH=/opt/hve/current
+ExecStart=/usr/bin/python3 -m hve db backup
+# Keep only the most recent 14 snapshots; caller manages retention via
+# /home/hve/.hve/backups/hve-db/ (14 * daily retention is a reasonable
+# alpha default; Hans can bump in a later iteration).
+NoNewPrivileges=true
+ProtectHome=false
+ProtectSystem=strict
+ReadWritePaths=/home/hve/.hve
+
+[Install]
+WantedBy=timers.target
