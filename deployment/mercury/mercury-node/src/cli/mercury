@@ -1,0 +1,1247 @@
+#!/usr/bin/env python3
+"""
+Mercury Node CLI — v0.3
+Terminal-native control for your sovereign Bitcoin Lightning node.
+
+Usage:
+  mercury status                  Node health at a glance
+  mercury channels                Lightning channel overview
+  mercury invoices [--last N]     Recent payments
+  mercury sync                    Bitcoin sync progress
+  mercury logs [service]          Live log tail
+  mercury backup                  Export static channel backup
+  mercury peers                   Connected Lightning peers
+  mercury pay <bolt11>            Send a Lightning payment
+  mercury invoice <sat> [memo]    Create a Lightning invoice
+  mercury magma [offers|score|recommend]  Magma liquidity intelligence
+  mercury ask "<question>"        Ask your node anything (AI — DGX Ollama)
+  mercury version                 Show version info
+"""
+
+import sys
+import os
+import json
+import subprocess
+import argparse
+import time
+import urllib.request
+import urllib.error
+from datetime import datetime, timezone
+
+# ── Constants ─────────────────────────────────────────────────────────────────
+MERCURY_VERSION = "0.4.0"
+LND_DIR = "/var/lib/lnd"
+LND_USER = "lnd"
+AGENT_URL = "http://localhost:8088"
+OLLAMA_URL = os.getenv("MERCURY_OLLAMA_URL", "http://10.0.0.79:11434")
+LOCAL_LLM_URL   = os.getenv("MERCURY_LOCAL_LLM_URL", "http://127.0.0.1:8089")
+OLLAMA_MODEL = os.getenv("MERCURY_OLLAMA_MODEL", "qwen2.5:14b")
+
+# ANSI colors
+R   = "\033[0;31m"
+Y   = "\033[1;33m"
+G   = "\033[0;32m"
+B   = "\033[0;34m"
+C   = "\033[0;36m"
+W   = "\033[1;37m"
+DIM = "\033[2m"
+NC  = "\033[0m"
+
+# ── LND wrapper ───────────────────────────────────────────────────────────────
+
+def lncli(*args, timeout=15):
+    """Run lncli command, return parsed JSON or raise."""
+    cmd = ["sudo", "-u", LND_USER, "lncli", f"--lnddir={LND_DIR}"] + list(args)
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=timeout
+        )
+        if result.returncode != 0:
+            return None, result.stderr.strip()
+        return json.loads(result.stdout), None
+    except subprocess.TimeoutExpired:
+        return None, "timeout"
+    except json.JSONDecodeError as e:
+        return None, f"json error: {e}"
+    except Exception as e:
+        return None, str(e)
+
+
+def systemctl_is_active(service):
+    try:
+        r = subprocess.run(
+            ["systemctl", "is-active", service],
+            capture_output=True, text=True, timeout=5
+        )
+        return r.stdout.strip() == "active"
+    except Exception:
+        return False
+
+
+def get_uptime():
+    try:
+        with open("/proc/uptime") as f:
+            secs = float(f.read().split()[0])
+        d = int(secs // 86400)
+        h = int((secs % 86400) // 3600)
+        m = int((secs % 3600) // 60)
+        if d > 0:
+            return f"{d}d {h}h {m}m"
+        elif h > 0:
+            return f"{h}h {m}m"
+        else:
+            return f"{m}m"
+    except Exception:
+        return "unknown"
+
+
+# ── Formatters ────────────────────────────────────────────────────────────────
+
+def fmt_sat(n):
+    """Format satoshi amount with comma separators."""
+    return f"{int(n):,} SAT"
+
+
+def fmt_pct(local, capacity):
+    """Return balance percentage and colored indicator."""
+    if capacity == 0:
+        return 0, Y
+    pct = int(local) / int(capacity) * 100
+    if 20 <= pct <= 80:
+        color = G
+    elif 10 <= pct < 20 or 80 < pct <= 90:
+        color = Y
+    else:
+        color = R
+    return pct, color
+
+
+def bar(pct, width=20):
+    """ASCII balance bar."""
+    filled = int(pct / 100 * width)
+    return f"[{'█' * filled}{'░' * (width - filled)}]"
+
+
+def service_dot(active):
+    return f"{G}●{NC}" if active else f"{R}●{NC}"
+
+
+# ── Commands ──────────────────────────────────────────────────────────────────
+
+def cmd_status(args):
+    info, err = lncli("getinfo")
+    wallet, _ = lncli("walletbalance")
+    channels, _ = lncli("listchannels")
+
+    services = {
+        "bitcoind": systemctl_is_active("bitcoind"),
+        "lnd":      systemctl_is_active("lnd"),
+        "btcpay":   systemctl_is_active("btcpayserver"),
+        "nbxplorer":systemctl_is_active("nbxplorer"),
+        "nginx":    systemctl_is_active("nginx"),
+    }
+    all_ok = all(services.values())
+    node_ok = info is not None and info.get("synced_to_chain", False)
+
+    # Header
+    status_icon = f"{G}🟢{NC}" if (all_ok and node_ok) else f"{Y}🟡{NC}" if node_ok else f"{R}🔴{NC}"
+    print(f"\n{status_icon} {W}Mercury Node v{MERCURY_VERSION}{NC}")
+    print(f"{DIM}{'─' * 45}{NC}")
+
+    # Node info
+    if info:
+        alias = info.get("alias", "unknown")
+        block = info.get("block_height", 0)
+        synced = info.get("synced_to_chain", False)
+        sync_icon = f"{G}✅{NC}" if synced else f"{Y}syncing...{NC}"
+        num_ch = info.get("num_active_channels", 0)
+        num_pending = info.get("num_pending_channels", 0)
+        print(f"  {DIM}Node    {NC} {W}{alias}{NC}")
+        print(f"  {DIM}Network {NC} mainnet | block {block:,} {sync_icon}")
+        print(f"  {DIM}Pubkey  {NC} {DIM}{info.get('identity_pubkey', '')[:32]}...{NC}")
+    else:
+        print(f"  {R}LND unavailable — run: sudo systemctl status lnd{NC}")
+
+    # Wallet
+    if wallet:
+        confirmed = int(wallet.get("confirmed_balance", 0))
+        unconfirmed = int(wallet.get("unconfirmed_balance", 0))
+        locked = int(wallet.get("locked_balance", 0))
+        print(f"  {DIM}Wallet  {NC} {W}{fmt_sat(confirmed)}{NC} confirmed", end="")
+        if unconfirmed > 0:
+            print(f"  {Y}+{fmt_sat(unconfirmed)} pending{NC}", end="")
+        print()
+        if locked > 0:
+            print(f"  {DIM}Locked  {NC} {DIM}{fmt_sat(locked)} (channels){NC}")
+
+    # Channels summary
+    if channels:
+        ch_list = channels.get("channels", [])
+        active = [c for c in ch_list if c.get("active")]
+        if active:
+            avg_pct = sum(int(c["local_balance"]) / int(c["capacity"]) * 100 for c in active) / len(active)
+            pct_color = G if 30 <= avg_pct <= 70 else Y
+            print(f"  {DIM}Channels{NC} {W}{len(active)} active{NC} | avg balance {pct_color}{avg_pct:.0f}%{NC}", end="")
+            if num_pending > 0:
+                print(f" {Y}({num_pending} pending){NC}", end="")
+            print()
+        else:
+            print(f"  {DIM}Channels{NC} {Y}0 active{NC}", end="")
+            if num_pending > 0:
+                print(f" {Y}({num_pending} pending — awaiting confirmation){NC}", end="")
+            print()
+
+    # Services
+    svc_line = "  " + "  ".join(
+        f"{service_dot(v)} {k}" for k, v in services.items()
+    )
+    print(f"\n{svc_line}")
+
+    # Uptime
+    print(f"  {DIM}Uptime   {NC} {get_uptime()}")
+    print(f"{DIM}{'─' * 45}{NC}\n")
+
+
+def cmd_channels(args):
+    channels, err = lncli("listchannels")
+    pending, _ = lncli("pendingchannels")
+
+    print(f"\n{W}Lightning Channels{NC}")
+    print(f"{DIM}{'─' * 55}{NC}")
+
+    if channels:
+        ch_list = channels.get("channels", [])
+        if not ch_list:
+            print(f"  {Y}No active channels.{NC}")
+        else:
+            for c in ch_list:
+                local = int(c["local_balance"])
+                capacity = int(c["capacity"])
+                remote = int(c["remote_balance"])
+                pct, color = fmt_pct(local, capacity)
+                active = c.get("active", False)
+                peer = c.get("remote_pubkey", "")[:20] + "..."
+                alias_info, _ = lncli("getnodeinfo", f"--pub_key={c['remote_pubkey']}")
+                alias = alias_info.get("node", {}).get("alias", peer) if alias_info else peer
+
+                dot = f"{G}●{NC}" if active else f"{R}●{NC}"
+                b = bar(pct)
+                print(f"\n  {dot} {W}{alias}{NC}")
+                print(f"     {color}{b}{NC} {pct:.0f}%")
+                print(f"     Local {color}{fmt_sat(local)}{NC}  Remote {DIM}{fmt_sat(remote)}{NC}  Cap {DIM}{fmt_sat(capacity)}{NC}")
+                if pct < 20:
+                    print(f"     {Y}⚠ Low outbound — consider rebalancing{NC}")
+                elif pct > 80:
+                    print(f"     {Y}⚠ Low inbound — consider rebalancing{NC}")
+
+    # Pending channels
+    if pending:
+        pending_open = pending.get("pending_open_channels", [])
+        if pending_open:
+            print(f"\n  {Y}Pending ({len(pending_open)}){NC}")
+            for p in pending_open:
+                ch = p.get("channel", {})
+                local = int(ch.get("local_balance", 0))
+                capacity = int(ch.get("capacity", 0))
+                peer = ch.get("remote_node_pub", "")[:20] + "..."
+                print(f"  {Y}⏳{NC} {peer}  {fmt_sat(local)} / {fmt_sat(capacity)}  {DIM}(awaiting 3 confirmations){NC}")
+
+    print(f"\n{DIM}{'─' * 55}{NC}\n")
+
+
+def cmd_invoices(args):
+    n = getattr(args, 'last', 10)
+    data, err = lncli("listinvoices", "--reversed", f"--num_max_invoices={n}")
+
+    print(f"\n{W}Recent Invoices{NC} {DIM}(last {n}){NC}")
+    print(f"{DIM}{'─' * 55}{NC}")
+
+    if not data:
+        print(f"  {R}Could not fetch invoices{NC}")
+        return
+
+    invoices = data.get("invoices", [])
+    if not invoices:
+        print(f"  {DIM}No invoices yet.{NC}")
+    else:
+        for inv in invoices:
+            state = inv.get("state", "UNKNOWN")
+            amt = int(inv.get("value", 0))
+            memo = inv.get("memo", "") or DIM + "(no memo)" + NC
+            settled_at = inv.get("settle_date", "0")
+
+            if state == "SETTLED":
+                icon = f"{G}✅{NC}"
+                ts = datetime.fromtimestamp(int(settled_at), tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
+                color = G
+            elif state == "OPEN":
+                icon = f"{Y}⏳{NC}"
+                ts = "pending"
+                color = Y
+            else:
+                icon = f"{DIM}✗{NC}"
+                ts = "expired"
+                color = DIM
+
+            print(f"  {icon} {color}{fmt_sat(amt)}{NC}  {DIM}{ts}{NC}  {memo}")
+
+    print(f"\n{DIM}{'─' * 55}{NC}\n")
+
+
+def cmd_sync(args):
+    info, err = lncli("getinfo")
+
+    print(f"\n{W}Bitcoin Sync Status{NC}")
+    print(f"{DIM}{'─' * 45}{NC}")
+
+    if not info:
+        print(f"  {R}LND unavailable{NC}")
+        return
+
+    synced = info.get("synced_to_chain", False)
+    block = info.get("block_height", 0)
+    synced_graph = info.get("synced_to_graph", False)
+
+    if synced:
+        print(f"  {G}✅ Fully synced{NC}")
+        print(f"  Block height: {W}{block:,}{NC}")
+        print(f"  Graph synced: {'✅' if synced_graph else '⏳ syncing'}")
+    else:
+        print(f"  {Y}⏳ Syncing...{NC}")
+        print(f"  Current block: {W}{block:,}{NC}")
+        print(f"  {DIM}IBD can take 48–72 hours on first run. Run again to check progress.{NC}")
+
+    print(f"{DIM}{'─' * 45}{NC}\n")
+
+
+def cmd_peers(args):
+    data, err = lncli("listpeers")
+
+    print(f"\n{W}Connected Peers{NC}")
+    print(f"{DIM}{'─' * 45}{NC}")
+
+    if not data:
+        print(f"  {DIM}No peers connected.{NC}")
+        return
+
+    for p in data.get("peers", []):
+        pubkey = p.get("pub_key", "")
+        address = p.get("address", "")
+        sent = int(p.get("sat_sent", 0))
+        recv = int(p.get("sat_recv", 0))
+        sync = p.get("sync_type", "")
+        info, _ = lncli("getnodeinfo", f"--pub_key={pubkey}")
+        alias = info.get("node", {}).get("alias", pubkey[:20] + "...") if info else pubkey[:20] + "..."
+        print(f"  {G}●{NC} {W}{alias}{NC}  {DIM}{address}{NC}")
+        print(f"      sent {fmt_sat(sent)}  recv {fmt_sat(recv)}  sync: {sync}")
+
+    print(f"{DIM}{'─' * 45}{NC}\n")
+
+
+def cmd_backup(args):
+    ts = datetime.now().strftime("%Y%m%d-%H%M")
+    path = f"/var/lib/mercury/backups/channels-{ts}.bak"
+    os.makedirs("/var/lib/mercury/backups", exist_ok=True)
+    data, err = lncli("exportchanbackup", "--all")
+    if err:
+        print(f"{R}Backup failed: {err}{NC}")
+        return
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2)
+    print(f"{G}✅ Channel backup saved:{NC} {path}")
+    print(f"{DIM}Store this file off-device (DGX Spark or Trezor USB).{NC}\n")
+
+
+def cmd_logs(args):
+    service = getattr(args, 'service', None) or 'lnd'
+    valid = ["lnd", "bitcoind", "btcpayserver", "nbxplorer", "nginx", "mercury-agent"]
+    if service not in valid:
+        print(f"{R}Unknown service. Choose: {', '.join(valid)}{NC}")
+        sys.exit(1)
+    print(f"{DIM}Tailing {service} logs (Ctrl+C to stop)...{NC}\n")
+    os.execlp("journalctl", "journalctl", "-u", service, "-f", "--no-pager")
+
+
+def cmd_pay(args):
+    bolt11 = args.bolt11
+    print(f"\n{W}Lightning Payment{NC}")
+    print(f"{DIM}{'─' * 55}{NC}")
+    print(f"  Invoice: {DIM}{bolt11[:60]}...{NC}")
+    print(f"\n  {Y}⚠  About to send payment. Confirm? [y/N]{NC} ", end="", flush=True)
+    try:
+        answer = input()
+    except (EOFError, KeyboardInterrupt):
+        print(f"\n  {Y}Cancelled.{NC}\n")
+        return
+    if answer.strip().lower() != "y":
+        print(f"  {Y}Cancelled.{NC}\n")
+        return
+
+    print(f"  {DIM}Sending...{NC}")
+    data, err = lncli("payinvoice", "--force", bolt11, timeout=60)
+    if err:
+        print(f"  {R}Payment failed: {err}{NC}\n")
+        return
+    status = data.get("status", "")
+    preimage = data.get("payment_preimage", "")
+    fee = int(data.get("fee_sat", 0))
+    if status == "SUCCEEDED":
+        print(f"  {G}✅ Payment sent!{NC}")
+        print(f"  Fee paid: {fmt_sat(fee)}")
+        print(f"  Preimage: {DIM}{preimage[:32]}...{NC}")
+    else:
+        print(f"  {R}Payment status: {status}{NC}")
+    print(f"{DIM}{'─' * 55}{NC}\n")
+
+
+def cmd_invoice(args):
+    sat = args.sat
+    memo = args.memo or ""
+    print(f"\n{W}Create Lightning Invoice{NC}")
+    print(f"{DIM}{'─' * 55}{NC}")
+
+    data, err = lncli("addinvoice", f"--amt={sat}", f"--memo={memo}", "--expiry=3600")
+    if err:
+        print(f"  {R}Failed: {err}{NC}\n")
+        return
+
+    pay_req = data.get("payment_request", "")
+    r_hash = data.get("r_hash", "")
+
+    print(f"  {G}✅ Invoice created{NC}")
+    print(f"  Amount: {W}{fmt_sat(sat)}{NC}")
+    if memo:
+        print(f"  Memo:   {memo}")
+    print(f"  Expiry: 1 hour")
+    print(f"\n  {W}BOLT11:{NC}")
+    print(f"  {C}{pay_req}{NC}")
+    print(f"\n  {DIM}Hash: {r_hash[:32]}...{NC}")
+    print(f"{DIM}{'─' * 55}{NC}\n")
+
+
+def _agent_get(path):
+    """Fetch JSON from mercury-agent, return (data, error)."""
+    try:
+        req = urllib.request.Request(f"{AGENT_URL}{path}")
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return json.loads(r.read()), None
+    except Exception as e:
+        return None, str(e)
+
+
+def cmd_magma(args):
+    subcmd = getattr(args, 'subcmd', None) or 'offers'
+
+    if subcmd == 'offers':
+        print(f"\n{W}Magma — Live Liquidity Offers{NC}")
+        print(f"{DIM}{'─' * 55}{NC}")
+        data, err = _agent_get("/api/magma/offers")
+        if err:
+            print(f"  {R}Agent unavailable: {err}{NC}")
+            print(f"  {DIM}Is mercury-agent running? sudo systemctl status mercury-agent{NC}\n")
+            return
+        offers = data.get("offers", [])
+        note = data.get("note", "")
+        total = data.get("total_market", data.get("count", 0))
+        print(f"  {DIM}Access: {note}  |  {total} total offers  |  {data.get('count', 0)} in range{NC}\n")
+        if not offers:
+            print(f"  {Y}No offers in current size range.{NC}")
+            print(f"  {DIM}Try: mercury magma offers --min 50000 --max 100000000{NC}")
+        else:
+            for o in offers[:10]:
+                size     = int(o.get("size_sat", 0))
+                fee_var  = int(o.get("fee_variable_sat", 0))
+                fee_fix  = int(o.get("fee_fixed_sat", 0))
+                ppm      = round(fee_var / size * 1_000_000) if size > 0 else 0
+                alias    = o.get("node_alias", "unknown")
+                status   = o.get("status", "ENABLED")
+                dot = G if status == "ENABLED" else Y
+                print(f"  {dot}●{NC} {W}{fmt_sat(size)}{NC}  "
+                      f"{DIM}{ppm} ppm  base {fee_fix} sat  {alias}{NC}")
+
+    elif subcmd == 'score':
+        print(f"\n{W}Magma — HVE-Mercury Node Score{NC}")
+        print(f"{DIM}{'─' * 55}{NC}")
+        data, err = _agent_get("/api/magma/node-score")
+        if err:
+            print(f"  {R}Agent unavailable: {err}{NC}\n")
+            return
+        visible = data.get("visible_in_graph", False)
+        min_ch  = data.get("min_channel_size_sat")
+        print(f"  Alias:    {W}{data.get('alias', 'HVE-Mercury')}{NC}")
+        print(f"  Pubkey:   {DIM}{data.get('pubkey', '')[:40]}...{NC}")
+        if visible:
+            print(f"  Graph:    {G}Visible ✅{NC}")
+            if min_ch:
+                print(f"  Min chan: {W}{fmt_sat(int(min_ch))}{NC}")
+        else:
+            print(f"  Graph:    {Y}Not yet visible — channel pending confirmation{NC}")
+            print(f"  {DIM}{data.get('note', '')}{NC}")
+            print(f"  {DIM}amboss.space/node/{data.get('pubkey', '')}{NC}")
+
+    elif subcmd == 'recommend':
+        print(f"\n{W}Magma — Best Inbound Liquidity Offers{NC}")
+        print(f"{DIM}{'─' * 55}{NC}")
+        data, err = _agent_get("/api/magma/recommend")
+        if err:
+            print(f"  {R}Agent unavailable: {err}{NC}\n")
+            return
+        recs = data.get("recommendations", [])
+        if not recs:
+            print(f"  {Y}No recommendations yet.{NC}")
+        else:
+            print(f"  {DIM}Sorted by lowest fee rate (best value first){NC}\n")
+            for r in recs:
+                alias   = r.get("node_alias", "unknown")
+                size    = int(r.get("size_sat", 0))
+                ppm     = r.get("fee_variable_ppm", 0)
+                fix_sat = int(r.get("fee_fixed_sat", 0))
+                print(f"  {G}→{NC} {W}{alias}{NC}")
+                print(f"     {fmt_sat(size)}  |  {ppm} ppm  base {fix_sat} sat")
+        print(f"\n  {Y}⚠  READ-ONLY — human approval required before opening channels{NC}")
+    else:
+        print(f"{R}Unknown magma subcommand: {subcmd}{NC}")
+        print(f"  Use: mercury magma [offers|score|recommend]")
+
+    print(f"{DIM}{'─' * 55}{NC}\n")
+
+
+def _build_node_context():
+    """Collect live node telemetry for AI context."""
+    info, _     = lncli("getinfo")
+    wallet, _   = lncli("walletbalance")
+    channels, _ = lncli("listchannels")
+    pending, _  = lncli("pendingchannels")
+    ctx = ""
+    if info:
+        ctx += f"Node alias: {info.get('alias')}\n"
+        ctx += f"Block height: {info.get('block_height')}, synced: {info.get('synced_to_chain')}\n"
+        ctx += f"Active channels: {info.get('num_active_channels')}, pending: {info.get('num_pending_channels')}\n"
+    if wallet:
+        ctx += f"Wallet: {wallet.get('confirmed_balance')} SAT confirmed, {wallet.get('unconfirmed_balance')} SAT pending\n"
+    if channels:
+        for c in channels.get("channels", []):
+            local = int(c["local_balance"])
+            cap   = int(c["capacity"])
+            pct   = round(local/cap*100, 1) if cap else 0
+            ctx += f"Channel: local {local} SAT / capacity {cap} SAT ({pct}% local)\n"
+    if pending:
+        for p in pending.get("pending_open_channels", []):
+            ch = p.get("channel", {})
+            ctx += f"Pending channel: {ch.get('local_balance')} SAT / {ch.get('capacity')} SAT (awaiting confirmation)\n"
+    return ctx
+
+
+def _ask_dgx(question, system_prompt):
+    """Stream answer from DGX Ollama. Returns True on success, False if unreachable."""
+    payload = json.dumps({
+        "model": OLLAMA_MODEL,
+        "prompt": question,
+        "system": system_prompt,
+        "stream": True,
+    }).encode()
+    try:
+        req = urllib.request.Request(
+            f"{OLLAMA_URL}/api/generate",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        print(f"  {G}A:{NC} ", end="", flush=True)
+        with urllib.request.urlopen(req, timeout=60) as r:
+            for line in r:
+                chunk = json.loads(line.decode())
+                print(chunk.get("response", ""), end="", flush=True)
+                if chunk.get("done"):
+                    break
+        print(f"\n")
+        return True
+    except urllib.error.URLError:
+        return False
+
+
+def _ask_local(question, system_prompt):
+    """Stream answer from local Qwen2.5-3B via llama.cpp OpenAI-compatible server."""
+    payload = json.dumps({
+        "model": "phi-3.5-mini",
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user",   "content": question},
+        ],
+        "stream": True,
+        "max_tokens": 512,
+    }).encode()
+    try:
+        req = urllib.request.Request(
+            f"{LOCAL_LLM_URL}/v1/chat/completions",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        print(f"  {G}A:{NC} ", end="", flush=True)
+        with urllib.request.urlopen(req, timeout=120) as r:
+            for line in r:
+                line = line.decode().strip()
+                if not line.startswith("data:"):
+                    continue
+                data = line[5:].strip()
+                if data == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(data)
+                    token = chunk.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                    print(token, end="", flush=True)
+                except (json.JSONDecodeError, IndexError, KeyError):
+                    pass
+        print(f"\n")
+        return True
+    except urllib.error.URLError as e:
+        print(f"\n  {R}Local LLM also unreachable: {e}{NC}")
+        print(f"  {DIM}Start it with: sudo systemctl start mercury-llm{NC}\n")
+        return False
+
+
+def cmd_ask(args):
+    question = " ".join(args.question)
+    node_ctx = _build_node_context()
+    system_prompt = (
+        "You are Mercury, an AI agent living inside a sovereign Bitcoin Lightning node "
+        "operated by Human Value Exchange (HVE). You have real-time access to the node's "
+        "telemetry. Answer concisely and practically. Always think in SATs. "
+        "You run locally on a Raspberry Pi 5 with a Hailo-8L AI accelerator. "
+        "Your current LLM is Qwen2.5-3B-Instruct, running fully on-device. "
+        "You are self-contained and do not depend on any external system. "
+        "Recommend actions when useful but note that human approval is required before any funds move.\n"
+        "Current node data:\n" + node_ctx
+    )
+
+    # Try local Qwen2.5-3B first (sovereign, no external dependency)
+    local_ok = False
+    try:
+        urllib.request.urlopen(f"{LOCAL_LLM_URL}/v1/models", timeout=2)
+        local_ok = True
+    except urllib.error.URLError:
+        pass
+
+    if local_ok:
+        print(f"\n{C}🤖 Mercury AI{NC}  {DIM}(Local — Qwen2.5-3B){NC}")
+        print(f"{DIM}{'─' * 55}{NC}")
+        print(f"  {W}Q:{NC} {question}\n")
+        if _ask_local(question, system_prompt):
+            return
+
+    # Fall back to DGX Spark if local is unavailable
+    dgx_ok = False
+    try:
+        urllib.request.urlopen(f"{OLLAMA_URL}/api/tags", timeout=3)
+        dgx_ok = True
+    except urllib.error.URLError:
+        pass
+
+    if dgx_ok:
+        print(f"\n{C}🤖 Mercury AI{NC}  {DIM}(DGX Spark — {OLLAMA_MODEL}){NC}")
+        print(f"{DIM}{'─' * 55}{NC}")
+        print(f"  {W}Q:{NC} {question}\n")
+        print(f"  {Y}Local AI unavailable — using DGX Spark{NC}\n")
+        _ask_dgx(question, system_prompt)
+        return
+
+    print(f"\n  {R}Mercury AI unavailable — local LLM and DGX both unreachable{NC}")
+    print(f"  {DIM}sudo systemctl start mercury-llm{NC}\n")
+
+
+def cmd_health(args):
+    """Full node diagnostic — hardware, stack, Lightning, AI, self-tests."""
+    import shutil
+
+    OK  = f"{G}✓{NC}"
+    ERR = f"{R}✗{NC}"
+    WRN = f"{Y}⚠{NC}"
+
+    results = []  # (ok, warn)
+
+    def chk(label, ok, detail="", warn=False):
+        sym = WRN if warn else (OK if ok else ERR)
+        results.append((ok, warn))
+        pad = 28
+        print(f"  {sym} {label:<{pad}} {DIM}{detail}{NC}")
+        return ok
+
+    def row(label, sym, detail):
+        ok = sym == OK
+        warn = sym == WRN
+        chk(label, ok, detail, warn=warn)
+
+    def sec(title):
+        print(f"\n{W}{title}{NC}")
+        print(f"{DIM}{'─' * 55}{NC}")
+
+    print(f"\n{C}⚡ Mercury Node — Full Health Check{NC}  {DIM}v{MERCURY_VERSION}{NC}")
+    print(f"{DIM}{'─' * 55}{NC}")
+    print(f"  {DIM}Running diagnostics...{NC}")
+
+    # ── 1. HARDWARE ──────────────────────────────────────────────────────────
+    sec("1 · Hardware")
+
+    # CPU / arch
+    try:
+        arch = subprocess.check_output(["uname", "-m"], text=True).strip()
+        cpus = subprocess.check_output(["nproc"], text=True).strip()
+        row("CPU", OK, f"{arch}  {cpus} cores")
+    except Exception:
+        row("CPU", ERR, "unavailable")
+
+    # RAM
+    try:
+        with open("/proc/meminfo") as f:
+            lines = {l.split(":")[0]: l.split(":")[1].strip() for l in f if ":" in l}
+        total_kb = int(lines["MemTotal"].split()[0])
+        avail_kb = int(lines["MemAvailable"].split()[0])
+        total_gb = round(total_kb / 1024 / 1024, 1)
+        used_gb  = round((total_kb - avail_kb) / 1024 / 1024, 1)
+        pct      = round(used_gb / total_gb * 100)
+        warn_ram = pct > 85
+        sym = WRN if warn_ram else OK
+        row("RAM", sym, f"{used_gb} GB / {total_gb} GB used ({pct}%)")
+    except Exception:
+        row("RAM", ERR, "unavailable")
+
+    # Disk
+    try:
+        disk = shutil.disk_usage("/")
+        used_gb = round(disk.used / 1024**3, 1)
+        total_gb = round(disk.total / 1024**3, 1)
+        pct = round(disk.used / disk.total * 100)
+        warn_disk = pct > 85
+        sym = WRN if warn_disk else OK
+        row("Disk /", sym, f"{used_gb} GB / {total_gb} GB used ({pct}%)")
+    except Exception:
+        row("Disk /", ERR, "unavailable")
+
+    # CPU temperature
+    try:
+        temp_raw = subprocess.check_output(
+            ["vcgencmd", "measure_temp"], text=True, stderr=subprocess.DEVNULL).strip()
+        temp_c = float(temp_raw.replace("temp=", "").replace("'C", ""))
+        warn_temp = temp_c > 70
+        sym = WRN if warn_temp else OK
+        row("CPU Temp", sym, f"{temp_c}°C")
+    except Exception:
+        try:
+            with open("/sys/class/thermal/thermal_zone0/temp") as f:
+                temp_c = int(f.read().strip()) / 1000
+            warn_temp = temp_c > 70
+            sym = WRN if warn_temp else OK
+            row("CPU Temp", sym, f"{temp_c}°C")
+        except Exception:
+            row("CPU Temp", WRN, "unavailable")
+
+    # Hailo AI accelerator
+    try:
+        hcli = subprocess.run(
+            ["hailortcli", "fw-control", "identify"],
+            capture_output=True, text=True, timeout=5
+        )
+        if hcli.returncode == 0:
+            fw = next((l.split(":")[1].strip() for l in hcli.stdout.splitlines() if "Firmware Version" in l), "?")
+            dev = next((l.split(":")[1].strip() for l in hcli.stdout.splitlines() if "Device Architecture" in l), "?")
+            row("Hailo AI", OK, f"{dev}  fw {fw}")
+        else:
+            row("Hailo AI", WRN, "detected but fw-control failed")
+    except FileNotFoundError:
+        row("Hailo AI", WRN, "hailortcli not found")
+    except Exception as e:
+        row("Hailo AI", WRN, str(e)[:40])
+
+    # System uptime / load
+    try:
+        with open("/proc/uptime") as f:
+            secs = float(f.read().split()[0])
+        d, rem = divmod(int(secs), 86400)
+        h, rem = divmod(rem, 3600)
+        m      = rem // 60
+        uptime = f"{d}d {h}h {m}m" if d else f"{h}h {m}m"
+        with open("/proc/loadavg") as f:
+            load = f.read().split()[:3]
+        row("Uptime / Load", OK, f"{uptime}  load {' '.join(load)}")
+    except Exception:
+        row("Uptime / Load", WRN, "unavailable")
+
+    # ── 2. SERVICES ──────────────────────────────────────────────────────────
+    sec("2 · Services")
+
+    services = [
+        ("bitcoind",       "Bitcoin Core"),
+        ("lnd",            "LND"),
+        ("btcpayserver",   "BTCPay Server"),
+        ("nbxplorer",      "NBXplorer"),
+        ("nginx",          "Nginx"),
+        ("mercury-agent",  "Mercury Agent"),
+        ("mercury-llm",    "Mercury LLM (Qwen2.5-3B)"),
+    ]
+
+    svc_status = {}
+    for svc, label in services:
+        try:
+            r = subprocess.run(
+                ["systemctl", "is-active", svc],
+                capture_output=True, text=True, timeout=5
+            )
+            active = r.stdout.strip() == "active"
+            svc_status[svc] = active
+            row(label, OK if active else ERR, "active" if active else r.stdout.strip())
+        except Exception:
+            svc_status[svc] = False
+            row(label, ERR, "check failed")
+
+    # ── 3. BITCOIN CORE ──────────────────────────────────────────────────────
+    sec("3 · Bitcoin Core")
+
+    # BTCPay sets up bitcoin-cli with a config file; try common locations
+    btc_cookie_args = []
+    for cookie in ["/var/lib/btcpayserver/bitcoin/.cookie",
+                   "/var/lib/bitcoin/.cookie",
+                   "/data/bitcoin/.cookie"]:
+        if os.path.exists(cookie):
+            btc_cookie_args = [f"-rpccookiefile={cookie}"]
+            break
+
+    try:
+        btc = subprocess.run(
+            ["bitcoin-cli"] + btc_cookie_args + ["getblockchaininfo"],
+            capture_output=True, text=True, timeout=10
+        )
+        if btc.returncode == 0:
+            bci = json.loads(btc.stdout)
+            blocks   = bci.get("blocks", 0)
+            headers  = bci.get("headers", 0)
+            progress = round(bci.get("verificationprogress", 0) * 100, 2)
+            pruned   = bci.get("pruned", False)
+            synced   = blocks == headers
+            row("Block height", OK if synced else WRN, f"{blocks} / {headers}  ({progress}%)")
+            row("Chain", OK, f"{bci.get('chain', '?')}  pruned={pruned}")
+        else:
+            # Fall back: we already have chain info from LND getinfo
+            row("Bitcoin Core RPC", WRN, "auth failed — chain data sourced from LND")
+    except Exception:
+        row("Bitcoin Core RPC", WRN, "bitcoin-cli not in PATH — chain data sourced from LND")
+
+    # BTC network peers
+    try:
+        np = subprocess.run(
+            ["bitcoin-cli"] + btc_cookie_args + ["getnetworkinfo"],
+            capture_output=True, text=True, timeout=10
+        )
+        if np.returncode == 0:
+            ni = json.loads(np.stdout)
+            conns = ni.get("connections", 0)
+            warn_peers = conns < 4
+            row("BTC Peers", WRN if warn_peers else OK, f"{conns} connections")
+    except Exception:
+        pass
+
+    # ── 4. LIGHTNING (LND) ───────────────────────────────────────────────────
+    sec("4 · Lightning (LND)")
+
+    info, err = lncli("getinfo")
+    if info:
+        synced_chain = info.get("synced_to_chain", False)
+        synced_graph = info.get("synced_to_graph", False)
+        block        = info.get("block_height", 0)
+        active_ch    = info.get("num_active_channels", 0)
+        pending_ch   = info.get("num_pending_channels", 0)
+        inactive_ch  = info.get("num_inactive_channels", 0)
+        peers        = info.get("num_peers", 0)
+        lnd_ver      = info.get("version", "?").split(" ")[0]
+
+        row("LND version", OK, lnd_ver)
+        row("Chain sync", OK if synced_chain else ERR, f"block {block}  synced={synced_chain}")
+        row("Graph sync", OK if synced_graph else WRN, f"synced={synced_graph}")
+        row("Channels", OK if active_ch > 0 else WRN,
+            f"{active_ch} active  {pending_ch} pending  {inactive_ch} inactive")
+        row("Peers", OK if peers > 0 else WRN, f"{peers} connected")
+    else:
+        row("LND getinfo", ERR, err or "unavailable")
+
+    # Wallet balance
+    wallet, _ = lncli("walletbalance")
+    if wallet:
+        conf   = int(wallet.get("confirmed_balance", 0))
+        unconf = int(wallet.get("unconfirmed_balance", 0))
+        locked = int(wallet.get("locked_balance", 0))
+        row("On-chain wallet", OK, f"{fmt_sat(conf)} confirmed  {fmt_sat(unconf)} unconf  {fmt_sat(locked)} locked")
+
+    # Channel liquidity
+    chans, _ = lncli("listchannels")
+    if chans and chans.get("channels"):
+        total_local  = sum(int(c["local_balance"])  for c in chans["channels"])
+        total_remote = sum(int(c["remote_balance"]) for c in chans["channels"])
+        total_cap    = sum(int(c["capacity"])        for c in chans["channels"])
+        local_pct    = round(total_local / total_cap * 100) if total_cap else 0
+        inactive     = [c for c in chans["channels"] if not c.get("active")]
+        warn_liq     = local_pct > 90 or local_pct < 10
+        warn_inactive = len(inactive) > 0
+        row("Lightning balance", WRN if warn_liq else OK,
+            f"local {fmt_sat(total_local)}  remote {fmt_sat(total_remote)}  ({local_pct}% local)")
+        if warn_inactive:
+            row("Inactive channels", WRN, f"{len(inactive)} channel(s) inactive")
+
+    # Pending HTLCs
+    try:
+        fwd, _ = lncli("listchannels")
+        if fwd:
+            htlcs = sum(len(c.get("pending_htlcs", [])) for c in fwd.get("channels", []))
+            if htlcs > 0:
+                row("Pending HTLCs", WRN, f"{htlcs} in-flight")
+            else:
+                row("Pending HTLCs", OK, "none")
+    except Exception:
+        pass
+
+    # Channel backup freshness
+    try:
+        backup_path = "/var/lib/lnd/data/chain/bitcoin/mainnet/channel.backup"
+        mtime = os.path.getmtime(backup_path)
+        age_h = round((time.time() - mtime) / 3600, 1)
+        warn_backup = age_h > 24
+        row("Channel backup", WRN if warn_backup else OK,
+            f"{backup_path.split('/')[-1]}  {age_h}h ago")
+    except Exception:
+        row("Channel backup", WRN, "backup file not found")
+
+    # ── 5. AI STACK ──────────────────────────────────────────────────────────
+    sec("5 · AI Stack")
+
+    # Mercury agent API
+    data, err = _agent_get("/api/status")
+    row("Mercury Agent API", OK if data else ERR,
+        f"http://localhost:8088  {'responding' if data else err}")
+
+    # Local LLM (Qwen2.5-3B)
+    try:
+        req = urllib.request.Request(
+            f"{LOCAL_LLM_URL}/v1/models",
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=5) as r:
+            row("Local LLM (Qwen2.5-3B)", OK, f"http://127.0.0.1:8089  responding")
+    except urllib.error.URLError:
+        row("Local LLM (Qwen2.5-3B)", WRN, "not responding — sudo systemctl start mercury-llm")
+
+    # DGX Spark Ollama
+    try:
+        req = urllib.request.Request(f"{OLLAMA_URL}/api/tags")
+        with urllib.request.urlopen(req, timeout=3) as r:
+            d = json.loads(r.read())
+            models = [m["name"] for m in d.get("models", [])]
+            row("DGX Spark (Ollama)", OK, f"{OLLAMA_URL}  {len(models)} models loaded")
+    except urllib.error.URLError:
+        row("DGX Spark (Ollama)", WRN, f"unreachable — fallback to local AI active")
+
+    # ── 6. NETWORK ───────────────────────────────────────────────────────────
+    sec("6 · Network")
+
+    # External reachability
+    try:
+        r = subprocess.run(
+            ["curl", "-s", "--max-time", "5", "https://api.ipify.org"],
+            capture_output=True, text=True, timeout=8
+        )
+        if r.returncode == 0 and r.stdout.strip():
+            row("External IP", OK, r.stdout.strip())
+        else:
+            row("External IP", WRN, "not reachable")
+    except Exception:
+        row("External IP", WRN, "check failed")
+
+    # LND REST/gRPC ports
+    for port, label in [("9735", "LND P2P (9735)"), ("8080", "LND REST (8080)")]:
+        try:
+            r = subprocess.run(
+                ["ss", "-tlnp", f"sport = :{port}"],
+                capture_output=True, text=True, timeout=5
+            )
+            listening = port in r.stdout
+            row(label, OK if listening else WRN, "listening" if listening else "not listening")
+        except Exception:
+            row(label, WRN, "check failed")
+
+    # BTCPay HTTP
+    try:
+        r = subprocess.run(
+            ["curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
+             "--max-time", "5", "http://localhost:80"],
+            capture_output=True, text=True, timeout=8
+        )
+        code = r.stdout.strip()
+        ok   = code in ("200", "302", "301")
+        row("BTCPay HTTP", OK if ok else WRN, f"HTTP {code}")
+    except Exception:
+        row("BTCPay HTTP", WRN, "check failed")
+
+    # ── 7. SECURITY ──────────────────────────────────────────────────────────
+    sec("7 · Security")
+
+    # SSH key auth (no password login)
+    try:
+        r = subprocess.run(
+            ["sshd", "-T"],
+            capture_output=True, text=True, timeout=5
+        )
+        pwd_auth = any("passwordauthentication yes" in l.lower() for l in r.stdout.splitlines())
+        row("SSH password auth", OK if not pwd_auth else WRN,
+            "disabled (key-only)" if not pwd_auth else "ENABLED — recommend disabling")
+    except Exception:
+        row("SSH password auth", WRN, "could not check sshd config")
+
+    # UFW firewall
+    try:
+        r = subprocess.run(["ufw", "status"], capture_output=True, text=True, timeout=5)
+        active = "active" in r.stdout.lower()
+        row("UFW Firewall", OK if active else WRN, "active" if active else "inactive — consider enabling")
+    except Exception:
+        row("UFW Firewall", WRN, "ufw not found")
+
+    # Fail2ban
+    try:
+        r = subprocess.run(["systemctl", "is-active", "fail2ban"],
+                           capture_output=True, text=True, timeout=5)
+        active = r.stdout.strip() == "active"
+        row("Fail2ban", OK if active else WRN, "active" if active else "inactive")
+    except Exception:
+        row("Fail2ban", WRN, "not found")
+
+    # ── SUMMARY ──────────────────────────────────────────────────────────────
+    errors = sum(1 for ok, warn in results if not ok and not warn)
+    warns  = sum(1 for ok, warn in results if warn)
+    passed = sum(1 for ok, warn in results if ok and not warn)
+
+    print(f"\n{DIM}{'─' * 55}{NC}")
+    if errors == 0 and warns == 0:
+        grade = f"{G}ALL SYSTEMS GO ✓{NC}"
+    elif errors == 0:
+        grade = f"{Y}HEALTHY WITH WARNINGS{NC}"
+    elif errors <= 2:
+        grade = f"{Y}DEGRADED — ACTION NEEDED{NC}"
+    else:
+        grade = f"{R}CRITICAL — MULTIPLE FAILURES{NC}"
+
+    print(f"\n  {grade}")
+    print(f"  {DIM}{passed - warns} passed  {warns} warnings  {errors} errors{NC}\n")
+
+
+def cmd_version(args):
+    info, _ = lncli("getinfo")
+    lnd_ver = info.get("version", "unknown") if info else "unavailable"
+    print(f"\n  Mercury Node  v{MERCURY_VERSION}")
+    print(f"  LND           {lnd_ver}")
+    print(f"  Python        {sys.version.split()[0]}\n")
+
+
+def cmd_shell(args=None):
+    """
+    Interactive Mercury session.
+    Type naturally — anything that isn't a command is sent to Mercury AI.
+    Commands: status channels invoices sync peers backup logs pay invoice magma version exit
+    """
+    import shlex
+
+    COMMANDS = {"status", "channels", "invoices", "sync", "peers",
+                "backup", "logs", "pay", "invoice", "magma", "health",
+                "version", "help", "exit", "quit", "clear", "cls"}
+
+    dispatch = {
+        "status":   cmd_status,
+        "channels": cmd_channels,
+        "invoices": cmd_invoices,
+        "sync":     cmd_sync,
+        "peers":    cmd_peers,
+        "backup":   cmd_backup,
+        "logs":     cmd_logs,
+        "pay":      cmd_pay,
+        "invoice":  cmd_invoice,
+        "magma":    cmd_magma,
+        "health":   cmd_health,
+        "version":  cmd_version,
+    }
+
+    # Show brief status on entry
+    print(f"\n{C}⚡ Mercury Node  v{MERCURY_VERSION}{NC}  {DIM}— sovereign Bitcoin Lightning node{NC}")
+    print(f"{DIM}Type naturally to talk to Mercury AI, or use commands: status channels magma invoices ...{NC}")
+    print(f"{DIM}Type 'exit' or press Ctrl+D to quit.{NC}\n")
+
+    # Quick status flash on entry
+    try:
+        data, err = _agent_get("/api/status")
+        if data and not err:
+            wallet = data.get("wallet", {})
+            chans  = data.get("channels", {})
+            bal    = wallet.get("confirmed_sat", 0)
+            active = chans.get("active", 0)
+            pending = chans.get("pending", 0)
+            block  = data.get("node", {}).get("block_height", "?")
+            chan_str = f"{active} active" + (f", {pending} pending" if pending else "")
+            print(f"  {G}●{NC} {W}{fmt_sat(bal)}{NC}  |  {chan_str}  |  block {block}\n")
+    except Exception:
+        pass
+
+    while True:
+        try:
+            line = input(f"{G}⚡{NC} ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print(f"\n{DIM}Goodbye.{NC}\n")
+            break
+
+        if not line:
+            continue
+
+        if line.lower() in ("exit", "quit", "bye"):
+            print(f"\n{DIM}Goodbye.{NC}\n")
+            break
+
+        if line.lower() in ("clear", "cls"):
+            os.system("clear")
+            continue
+
+        if line.lower() == "help":
+            print(f"\n  {W}Commands:{NC}  status  channels  invoices  sync  peers  backup  logs")
+            print(f"             pay <bolt11>  invoice <sat> [memo]")
+            print(f"             magma [offers|score|recommend]  health  version  exit")
+            print(f"  {W}Or just type naturally{NC} — anything else goes to Mercury AI.\n")
+            continue
+
+        try:
+            parts = shlex.split(line)
+        except ValueError:
+            parts = line.split()
+
+        # Allow "mercury <cmd>" prefix inside the shell
+        if parts and parts[0].lower() == "mercury" and len(parts) > 1:
+            parts = parts[1:]
+
+        cmd = parts[0].lower() if parts else ""
+        rest = parts[1:]
+
+        if cmd not in COMMANDS:
+            # Natural language → AI
+            ns = argparse.Namespace(question=line.split())
+            try:
+                cmd_ask(ns)
+            except KeyboardInterrupt:
+                print()
+            continue
+
+        if cmd in ("exit", "quit"):
+            print(f"\n{DIM}Goodbye.{NC}\n")
+            break
+
+        ns = argparse.Namespace(command=cmd)
+        try:
+            if cmd == "invoices":
+                ns.last = int(rest[0]) if rest else 10
+            elif cmd == "logs":
+                ns.service = rest[0] if rest else "lnd"
+            elif cmd == "pay":
+                if not rest:
+                    print(f"  {Y}Usage: pay <bolt11>{NC}")
+                    continue
+                ns.bolt11 = rest[0]
+            elif cmd == "invoice":
+                if not rest:
+                    print(f"  {Y}Usage: invoice <sat> [memo]{NC}")
+                    continue
+                ns.sat = int(rest[0])
+                ns.memo = " ".join(rest[1:]) if len(rest) > 1 else ""
+            elif cmd == "magma":
+                ns.subcmd = rest[0] if rest else "offers"
+                ns.min_sat = 100000
+                ns.max_sat = 5000000
+        except (ValueError, IndexError) as e:
+            print(f"  {R}Argument error: {e}{NC}")
+            continue
+
+        try:
+            dispatch[cmd](ns)
+        except KeyboardInterrupt:
+            print()
+
+
+# ── Main ──────────────────────────────────────────────────────────────────────
+
+def main():
+    parser = argparse.ArgumentParser(
+        prog="mercury",
+        description="Mercury Node — sovereign Bitcoin Lightning node CLI",
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    sub = parser.add_subparsers(dest="command")
+
+    sub.add_parser("health",   help="Full system diagnostic + self-test")
+    sub.add_parser("shell",    help="Interactive shell (no 'mercury' prefix needed)")
+    sub.add_parser("status",   help="Node health at a glance")
+    sub.add_parser("sync",     help="Bitcoin sync progress")
+    sub.add_parser("peers",    help="Connected peers")
+    sub.add_parser("backup",   help="Export static channel backup")
+    sub.add_parser("version",  help="Version info")
+
+    sub.add_parser("channels", help="Lightning channel overview")
+
+    inv_p = sub.add_parser("invoices", help="Recent payments")
+    inv_p.add_argument("--last", type=int, default=10, metavar="N", help="Show last N invoices")
+
+    log_p = sub.add_parser("logs", help="Live log tail")
+    log_p.add_argument("service", nargs="?", default="lnd",
+                       help="Service: lnd, bitcoind, btcpayserver, nbxplorer, nginx, mercury-agent")
+
+    pay_p = sub.add_parser("pay", help="Send a Lightning payment")
+    pay_p.add_argument("bolt11", help="BOLT11 invoice string")
+
+    inv_create_p = sub.add_parser("invoice", help="Create a Lightning invoice")
+    inv_create_p.add_argument("sat", type=int, help="Amount in satoshis")
+    inv_create_p.add_argument("memo", nargs="?", default="", help="Optional memo")
+
+    magma_p = sub.add_parser("magma", help="Magma liquidity intelligence")
+    magma_p.add_argument("subcmd", nargs="?", default="offers",
+                         choices=["offers", "score", "recommend"],
+                         help="offers (default), score, recommend")
+    magma_p.add_argument("--min", type=int, default=100000, dest="min_sat", metavar="SAT")
+    magma_p.add_argument("--max", type=int, default=5000000, dest="max_sat", metavar="SAT")
+
+    ask_p = sub.add_parser("ask", help="Ask your node anything (AI)")
+    ask_p.add_argument("question", nargs="+", help="Your question in natural language")
+
+    args = parser.parse_args()
+
+    dispatch = {
+        "status":   cmd_status,
+        "channels": cmd_channels,
+        "invoices": cmd_invoices,
+        "sync":     cmd_sync,
+        "peers":    cmd_peers,
+        "backup":   cmd_backup,
+        "logs":     cmd_logs,
+        "pay":      cmd_pay,
+        "invoice":  cmd_invoice,
+        "magma":    cmd_magma,
+        "ask":      cmd_ask,
+        "health":   cmd_health,
+        "version":  cmd_version,
+        "shell":    cmd_shell,
+    }
+
+    if args.command is None:
+        cmd_shell()
+        return
+
+    if args.command in dispatch:
+        try:
+            dispatch[args.command](args)
+        except KeyboardInterrupt:
+            print()
+    else:
+        parser.print_help()
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
