@@ -15,7 +15,9 @@ from .health import serve
 
 def main() -> int:
     cfg = load()
-    server = serve(cfg, block=True)
+    # Run the HTTP server in its worker thread while this process handles
+    # signals and keeps systemd's main process responsive.
+    server = serve(cfg, block=False)
     try:
         print(
             f"hve serve: listening on http://{cfg.http_host}:{cfg.http_port} "
