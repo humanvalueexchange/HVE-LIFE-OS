@@ -2,7 +2,8 @@
 
 This directory is a vendored, source-only snapshot of the private
 `humanvalueexchange/mercury-node` repository for HVE Life OS deployment
-planning and review.
+planning and review. The CLI file also contains the reviewed Mercury-host
+runtime fixes listed below.
 
 - Source repository: `https://github.com/humanvalueexchange/mercury-node`
 - Source branch: `main`
@@ -11,6 +12,15 @@ planning and review.
 
 The nested Git metadata is intentionally excluded. Update this snapshot only
 from a reviewed upstream commit and record the new commit here.
+
+## Mercury-host runtime delta
+
+The current `src/cli/mercury` includes the deployed Qwen3.8 local-model label
+and fallback path, plus terminal-safe word wrapping for streamed responses.
+These changes were applied on Mercury on 2026-08-22 and copied here so the
+GitHub deployment reference matches the tested host behavior. The native
+llama.cpp server binary is installed separately on Mercury and is not
+vendored in this source snapshot.
 
 ## Integration boundary
 
