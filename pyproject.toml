@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "hve"
 version = "0.1.0"
-description = "HVE Life OS — local-first Personal Sovereignty Operating System (Mercury alpha)"
+description = "HVE Life OS — local-first Personal Sovereignty Operating System (DGX Spark Alpha v1)"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Proprietary" }

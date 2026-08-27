@@ -1,5 +1,8 @@
 # Mercury Node — Architecture
 
+> **Historical/experimental Mercury architecture.** Preserved for reference;
+> the active HVE Life OS architecture is `docs/architecture-spark.md`.
+
 **Version:** 0.1.0-draft  
 **Owner:** CTO — Claude Sonnet 4.6  
 **Last updated:** 2026-05-16

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# PARKED / EXPERIMENTAL — legacy Mercury rollback helper.
+# The active reference runtime is directory-contained at /home/hans/hve-life-os.
 # HVE Life OS — explicit-confirmation rollback.
 #
 # D10=B: the rollback restores the *prior* application + config snapshot

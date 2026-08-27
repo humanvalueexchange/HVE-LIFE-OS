@@ -1,4 +1,7 @@
-# HVE Life OS — Mercury Rollback Runbook (alpha)
+# PARKED / EXPERIMENTAL — HVE Life OS Mercury Rollback Runbook (historical)
+
+> Preserved for historical Mercury rollback procedures. Do not use it as
+> current DGX Spark deployment guidance; see `docs/architecture-spark.md`.
 
 Audience: Hans (operator). This is a short, safe, confirmed sequence to
 undo a recent change on Mercury. It assumes the change was made on this

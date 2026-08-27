@@ -1,3 +1,5 @@
+# PARKED / EXPERIMENTAL — legacy Mercury systemd template.
+
 [Unit]
 Description=HVE Life OS — periodic SQLite backup (D10=B)
 After=network.target

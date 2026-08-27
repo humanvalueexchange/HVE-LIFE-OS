@@ -50,6 +50,6 @@ def test_md_lists_schema_version_and_model(cfg):
     report.generate(cfg)
     md = cfg.reports_md.read_text()
     assert "Schema version: 1" in md
-    assert "Qwen2.5 3B" in md
+    assert "Qwen3.8-2B-Distill-Q4_K_M" in md
     # The SHA-256 prefix from the manifest is present.
-    assert "626b4a6678b8" in md
+    assert "4aa0fb13c431" in md

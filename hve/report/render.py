@@ -9,7 +9,7 @@ Design (Issue #1 D3=B + D9=B):
 * Output is self-contained (inline CSS, no external assets, no JS).
 * Only placeholders / structured facts / knowledge titles appear — no
   raw personal knowledge text is inlined, only a *count* per domain
-  and the first 3 facts, to keep the HTML small on Mercury.
+  and the first 3 facts, to keep the HTML small for local-first operation.
 """
 
 from __future__ import annotations
@@ -62,10 +62,12 @@ def _gather(cfg: HveConfig) -> ReportInput:
         knowledge_by_domain=knowledge_by_domain,
         schema_version=manager.current_version(cfg),
         model={
-            "name": "Qwen2.5 3B Instruct Q4_K_M (GGUF)",
+            "name": cfg.model_name,
+            "backend": cfg.model_backend,
             "context_tokens": cfg.model_context_tokens,
+            "max_output_tokens": cfg.model_max_output_tokens,
             "endpoint": cfg.model_endpoint,
-            "checksum": "626b4a6678b86442240e33df819e00132d3ba7dddfe1cdc4fbb18e0a9615c62d",
+            "checksum": cfg.model_checksum,
         },
     )
 
@@ -84,8 +86,9 @@ def render_md(inp: ReportInput) -> str:
     out.append(f"Generated: {inp.now}")
     out.append(f"Schema version: {inp.schema_version}")
     out.append(f"Model: {inp.model['name']} — {inp.model['context_tokens']} tokens — "
+               f"initial output cap {inp.model['max_output_tokens']} — "
                f"SHA-256 `{inp.model['checksum'][:12]}…`")
-    out.append(f"Backend: {inp.model['endpoint']}")
+    out.append(f"Backend: {inp.model['backend']} — {inp.model['endpoint']}")
     out.append("")
     for domain in FIVE_WEALTH_DOMAINS:
         title = _title_for(domain)
@@ -109,7 +112,7 @@ def render_md(inp: ReportInput) -> str:
     out.append("---")
     out.append("")
     out.append("HVE Life OS — local-first Personal Sovereignty Operating System. "
-               "No cloud dependency. Mercury alpha.")
+               "No cloud or Ollama dependency. DGX Spark Alpha v1 reference.")
     out.append("")
     return "\n".join(out)
 
@@ -138,8 +141,9 @@ def render_html(inp: ReportInput) -> str:
     cards_html = "\n".join(cards)
     model_line = (
         f"{_esc(inp.model['name'])} · {inp.model['context_tokens']} tokens · "
+        f"initial output cap {inp.model['max_output_tokens']} · "
         f"SHA-256 <code>{_esc(inp.model['checksum'])}</code> · "
-        f"<code>{_esc(inp.model['endpoint'])}</code>"
+        f"{_esc(inp.model['backend'])} · <code>{_esc(inp.model['endpoint'])}</code>"
     )
     return f"""<!doctype html>
 <html lang="en">
@@ -169,7 +173,7 @@ footer {{ margin-top: 2rem; color: #888; font-size: 0.85rem; }}
 {model_line}</p>
 {cards_html}
 <footer>HVE Life OS — local-first Personal Sovereignty Operating System.
-Mercury alpha. No cloud dependency.</footer>
+DGX Spark Alpha v1 reference. No cloud or Ollama dependency.</footer>
 </body>
 </html>
 """

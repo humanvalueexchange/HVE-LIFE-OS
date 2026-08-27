@@ -1,5 +1,8 @@
 # Mercury Node — Roadmap
 
+> **Historical/experimental Mercury roadmap.** Preserved for reference and
+> separate from the active DGX Spark HVE Life OS roadmap.
+
 **Vision:** The world's simplest AI-first Bitcoin Lightning node.  
 **Public launch target:** Q3 2026
 

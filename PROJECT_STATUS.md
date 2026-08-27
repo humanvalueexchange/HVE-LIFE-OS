@@ -1,47 +1,71 @@
 # HVE Life OS Project Status
 
-Last verified: 2026-08-23
+Last reviewed: 2026-08-26
 
 ## Canonical project
 
 - Repository: `https://github.com/humanvalueexchange/HVE-LIFE-OS`
-- Deployment repository, distinct from `hve-knowledge-and-operations`.
-- Default branch: `main`
+- Product: local-first Personal Sovereignty OS
+- Framework: Five Wealth — Time, Physical, Mental, Social, Financial
+- Active reference root: `/home/hans/hve-life-os`
+- Deployment shape: directory-contained on DGX Spark
 
-## Active objective
+## Active Alpha v1 runtime
 
-Deploy HVE Life OS on an Ubuntu laptop with an AMD CPU, 32 GB system RAM,
-and an NVIDIA RTX 4070 laptop GPU with 8 GB VRAM. The preferred runtime is
-native CUDA-enabled llama.cpp with Qwen3.8-2B Q4_K_M at a truthful 64K context.
+| Component | Current state |
+|---|---|
+| Host | DGX Spark reference deployment |
+| Backend | Native `llama.cpp` CPU/NEON, not CUDA |
+| Model | `Qwen3.8-2B-Distill-Q4_K_M` |
+| SHA-256 | `4aa0fb13c431514262f259d420ecc95a8714df58ac2a2384514e20b93983f0ff` |
+| Context | Exactly 65536 tokens |
+| Initial output cap | 1024 tokens |
+| Model API | `127.0.0.1:8089` |
+| HVE API | `127.0.0.1:8090` |
+| Data | `HVE_HOME`-contained SQLite, Markdown, reports, logs, backups |
+| Ollama | Prohibited/off-limits |
 
-## Host map
+The reference runtime has verified health checks, a local model endpoint, the
+HVE service, Hermes skill/plain/tool-call paths, and an operator TUI. The
+reference runtime is separate from this Git checkout; this repository does
+not claim to contain the runtime-only TUI launcher.
 
-| Host | Role | Current status |
-|---|---|---|
-| Mercury | Raspberry Pi 5 edge node with AI HAT+ 2 | Qwen3.8-2B via CPU llama.cpp works at 32K but is too slow for interactive Hermes |
-| Spark | DGX Spark model and inference host | Not the target for the laptop deployment |
-| Ubuntu laptop | Primary Hermes/HVE Life OS target | Deployment installer still needed |
+## Repository verification boundary
 
-## Mercury findings
+This checkout contains the HVE application, skill, deployment contract,
+knowledge templates, legacy Mercury artifacts, and existing tests. It
+currently collects 48 tests when the repository's pytest dependency is
+available. A 60-test result is not claimed here because 60 tests are not
+present in this checkout.
 
-- Mercury's current llama.cpp service can load Qwen3.8-2B at 32K.
-- Hermes can be allowed below its 64K default using the Mercury-specific
-  `HERMES_MINIMUM_CONTEXT_LENGTH` overlay, but the 32K CPU path is too slow.
-- The AI HAT+ 2 should not be assumed to accelerate arbitrary GGUF files;
-  Hailo-compatible HEF models use a separate runtime and model pipeline.
+## Product direction
 
-## Laptop deployment requirements
+The primary UX is a local-first website/PWA. The CLI/TUI remains available
+for operators and power users. Statoshi.info is dashboard
+UX/information-architecture inspiration only.
 
-- Use a separate Ubuntu deployment adapter; do not run the ARM64 Mercury installer.
-- Verify NVIDIA driver, CUDA capability, RAM, disk, and model checksum.
-- Configure llama.cpp with GPU offload, Flash Attention, one active slot, and
-  a bounded output token budget.
-- Configure Hermes with `model.context_length: 65536` only after the backend
-  reports a 65536-token context.
-- Keep the service localhost-only by default, with explicit LAN opt-in.
-- Include health checks, inference smoke tests, and rollback metadata.
+Planned next workflow:
 
-## Command discipline
+- contextual right-side dashboard chat;
+- advisor Teams transcript → reviewed Excel collector;
+- client import preview, consent, and provenance;
+- local Five Wealth data workflow.
 
-Every operational command must name its execution host and verify actual
-hostnames, IP addresses, users, paths, and service names before use.
+Excel trackers are initial scorecard and client-discovery interchange
+models.
+
+## Mercury
+
+Mercury Raspberry Pi is **parked/experimental**, not the active target.
+Historical deployment, rollback, Mercury Node, and context-floor artifacts
+are intentionally preserved under `deployment/mercury/`, `docs/*mercury*`,
+and the parked service templates. They must not be read as current Spark
+deployment instructions.
+
+## Uncertainties
+
+- The reference runtime is outside this repository and is not modified by
+  documentation changes here.
+- Systemd units in `service/` describe the parked Mercury layout; the
+  directory-contained Spark launchers are runtime-owned and are not generated
+  by this repository.

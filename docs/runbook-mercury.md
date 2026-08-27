@@ -1,4 +1,8 @@
-# HVE Life OS — Mercury Runbook (alpha)
+# PARKED / EXPERIMENTAL — HVE Life OS Mercury Runbook (historical alpha)
+
+> This runbook preserves the Mercury Raspberry Pi operating contract. It is
+> not current Spark deployment guidance. See `docs/architecture-spark.md` for
+> the active directory-contained reference deployment.
 
 Audience: Hans (operator) and any future developer touching the Mercury 8K
 alpha. This file is the single source of truth for day-to-day operations.

@@ -2,38 +2,45 @@ schema_version: 1
 project: hve-life-os
 release_channel: alpha
 
+deployment:
+  target: dgx-spark
+  status: reference-active
+  root: /home/hans/hve-life-os
+  containment: directory-contained
+
 upstream:
   name: nous-hermes-agent
   repository: https://github.com/NousResearch/hermes-agent.git
   commit: a871948d8d4b0f774d4ec40467bab1078a9f28d5
-  source_note: Mercury currently has one local context-floor compatibility change.
+  profile: hve-alpha
 
 model:
-  name: qwen2.5-3b-instruct
+  name: Qwen3.8-2B-Distill-Q4_K_M
   format: gguf
   quantization: Q4_K_M
-  context_tokens: 8192
-  backend: llama.cpp
+  context_tokens: 65536
+  max_output_tokens: 1024
+  backend: llama.cpp-cpu-neon
   endpoint: http://127.0.0.1:8089/v1
-  artifact_path: /opt/mercury/models/qwen2.5-3b-instruct-q4_k_m.gguf
-  checksum: 626b4a6678b86442240e33df819e00132d3ba7dddfe1cdc4fbb18e0a9615c62d
+  artifact_path: /home/hans/hve-life-os/models/Qwen3.8-2B-Distill-Q4_K_M.gguf
+  checksum: 4aa0fb13c431514262f259d420ecc95a8714df58ac2a2384514e20b93983f0ff
   checksum_algorithm: sha256
-  # Verified on Mercury (task 2026-08-22 M1 repair loop): `sha256sum` of the
-  # artifact at the path above matches this value. See docs/runbook-mercury.md
-  # for the re-verification command.
 
 targets:
-  mercury:
-    status: alpha
+  dgx-spark:
+    status: reference-active
     architecture: aarch64
-    minimum_ram_gb: 8
-    preferred_ram_gb: 16
+    root: /home/hans/hve-life-os
+  mercury:
+    status: parked-experimental
+    architecture: aarch64
   ubuntu-windows:
     status: planned
   macos:
     status: planned
 
-overlay:
-  context_floor_env: HERMES_MINIMUM_CONTEXT_LENGTH
-  context_floor_value: 8192
-  system_manager: systemd
+hve:
+  home: /home/hans/hve-life-os/data
+  endpoint: http://127.0.0.1:8090
+  network: loopback-only
+  ollama: prohibited

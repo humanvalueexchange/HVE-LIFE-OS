@@ -1,4 +1,7 @@
-# HVE Life OS — M2 Backlog
+# PARKED / EXPERIMENTAL — HVE Life OS M2 Mercury Backlog
+
+> This is a preserved planning record for optional Mercury integration. It
+> does not describe the active Alpha v1 target, which is DGX Spark.
 
 ## M2-01: Integrate Mercury Node as the Alpha Infrastructure Adapter
 
@@ -66,9 +69,10 @@ operate safely if the HVE application or AI layer is unavailable.
   source distribution; establish a pinned source/build contract.
 - The CLI contains direct payment, channel, rebalance, deposit, and send
   commands; these must not be exposed through HVE's agent path.
-- The CLI defaults to a remote Ollama URL while also using a local
-  `llama.cpp` endpoint; provider selection and data routing need explicit
-  configuration.
+- The reviewed Mercury Node CLI (not HVE Life OS) defaults to a remote Ollama
+  URL while also using a local `llama.cpp` endpoint; provider selection and
+  data routing need explicit configuration. This remains outside the active
+  HVE runtime, where Ollama is prohibited.
 - The FastAPI service enables permissive CORS and binds to `0.0.0.0` in the
   source unit; validate that the alpha deployment is loopback-only.
 - The repository documentation contains stale version, roadmap, domain, and

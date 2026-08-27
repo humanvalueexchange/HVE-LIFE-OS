@@ -1,3 +1,5 @@
+# PARKED / EXPERIMENTAL — legacy Mercury systemd template.
+
 [Unit]
 Description=HVE Life OS — daily SQLite backup timer (D10=B)
 Requires=hve-db-backup.service

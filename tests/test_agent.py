@@ -76,7 +76,7 @@ def test_timeout_raises(cfg, seeded, tmp_path, monkeypatch):
 def test_argv_matches_verified_contract(seeded, monkeypatch, capsys, tmp_path):
     """Task item 3: pin the EXACT argv the module passes to subprocess.
 
-    The Mercury CLI (Hermes v0.20.5, read-only inspection) exposes:
+    The local Hermes CLI (read-only inspection) exposes:
         hermes chat -q "<prompt>" -s hve-life-os -Q
     `hermes send` is the messaging command and is NOT the right tool
     for running a prompted agent.

@@ -1,3 +1,6 @@
+# PARKED / EXPERIMENTAL — historical Mercury compatibility patch.
+# It is not part of the active DGX Spark 65536-token runtime contract.
+
 diff --git a/agent/model_metadata.py b/agent/model_metadata.py
 index 45baf18..aec6baa 100644
 --- a/agent/model_metadata.py

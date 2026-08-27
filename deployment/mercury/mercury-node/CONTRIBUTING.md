@@ -1,5 +1,8 @@
 # Contributing to Mercury Node
 
+> **Historical/experimental artifact.** This vendored Mercury material is
+> preserved for reference and is not the active HVE Life OS target.
+
 Mercury Node is currently in **private development** ahead of our Q3 2026 public launch.
 
 If you're reading this before the public launch: welcome. You're early.

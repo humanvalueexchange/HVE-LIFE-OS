@@ -1,5 +1,8 @@
 # Security Policy
 
+> **Historical/experimental Mercury artifact.** This policy belongs to the
+> parked Mercury material, not the active DGX Spark Alpha v1 deployment.
+
 ## Supported Versions
 
 | Version | Supported |

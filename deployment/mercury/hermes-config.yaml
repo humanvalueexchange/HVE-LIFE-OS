@@ -1,4 +1,5 @@
-# Sanitized HVE Mercury overlay.
+# PARKED / EXPERIMENTAL — historical HVE Mercury overlay.
+# The active target is the DGX Spark reference deployment.
 # Do not put credentials, tokens, or personal data in this file.
 model:
   provider: custom

@@ -1,5 +1,11 @@
 # HVE Life OS Agent Organization Charter v0.4
 
+> **Historical charter:** this v0.4 document records the earlier Mercury
+> alpha deployment framing. The active Alpha v1 target is the
+> directory-contained DGX Spark reference deployment described in
+> `PROJECT_STATUS.md` and `docs/architecture-spark.md`. Mercury references
+> below are preserved historical context, not current deployment guidance.
+
 **Document type:** Agent communications charter  
 **Program:** HVE Life OS Alpha  
 **Owner:** Human Value Exchange  
