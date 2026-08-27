@@ -53,12 +53,28 @@ def _env_bool(name: str, default: bool) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _env_path(name: str, default: Path | None, *, root: Path | None = None) -> Path:
+def _resolve_base_home() -> Path:
+    """Base home for the HVE runtime.
+
+    ``HVE_HOME`` (if set and non-empty) is the base; otherwise
+    ``Path.home()/.hve``. This is the single source for ALL runtime dirs so
+    the deployment is directory-contained wherever ``HVE_HOME`` points.
+    """
+    raw = os.environ.get("HVE_HOME")
+    if raw:
+        p = Path(raw).expanduser()
+        return p if p.is_absolute() else Path.cwd() / p
+    return Path.home() / ".hve"
+
+
+def _env_path(
+    name: str, default: Path | None, *, root: Path | None = None
+) -> Path | None:
     raw = os.environ.get(name)
     if raw:
         p = Path(raw).expanduser()
-        return p if p.is_absolute() else (root or Path.cwd()) / p
-    return default or (root or Path.home()) / ".hve"
+        return p if p.is_absolute() else (root or _resolve_base_home()) / p
+    return default
 
 
 @dataclass(frozen=True)
@@ -67,22 +83,26 @@ class HveConfig:
 
     Built with :func:`load` so it can be overridden per-process via env
     variables (the systemd EnvironmentFile pattern).
+
+    Directory containment: ``home`` (from ``HVE_HOME``), ``db_path``,
+    ``knowledge_dir``, ``reports_dir`` and ``backups_dir`` all anchor to the
+    base home so the runtime never writes outside the deployment root.
     """
 
     home: Path = field(
         default_factory=lambda: _env_path("HVE_HOME", Path.home() / ".hve")
     )
     db_path: Path = field(
-        default_factory=lambda: _env_path("HVE_DB_PATH", Path.home() / ".hve" / "data" / "hve.db")
+        default_factory=lambda: _env_path("HVE_DB_PATH", None)
     )
     knowledge_dir: Path = field(
-        default_factory=lambda: _env_path("HVE_KNOWLEDGE_DIR", Path.home() / ".hve" / "knowledge")
+        default_factory=lambda: _env_path("HVE_KNOWLEDGE_DIR", None)
     )
     reports_dir: Path = field(
-        default_factory=lambda: _env_path("HVE_REPORTS_DIR", Path.home() / ".hve" / "reports")
+        default_factory=lambda: _env_path("HVE_REPORTS_DIR", None)
     )
     backups_dir: Path = field(
-        default_factory=lambda: _env_path("HVE_BACKUPS_DIR", Path.home() / ".hve" / "backups")
+        default_factory=lambda: _env_path("HVE_BACKUPS_DIR", None)
     )
     http_host: str = field(default_factory=lambda: os.environ.get("HVE_HTTP_HOST", DEFAULT_LOOPBACK_HOST))
     http_port: int = field(
@@ -109,6 +129,17 @@ class HveConfig:
                 f"HVE_HTTP_HOST must be loopback-only in alpha, got {self.http_host!r}; "
                 "Issue #1 D7 mandates 127.0.0.1."
             )
+        # Derive any dir that was left at the None default from `home` so the
+        # whole runtime is directory-contained wherever HVE_HOME points.
+        # (object.__setattr__ is required because the dataclass is frozen.)
+        if self.knowledge_dir is None:
+            object.__setattr__(self, "knowledge_dir", self.home / "knowledge")
+        if self.reports_dir is None:
+            object.__setattr__(self, "reports_dir", self.home / "reports")
+        if self.backups_dir is None:
+            object.__setattr__(self, "backups_dir", self.home / "backups")
+        if self.db_path is None:
+            object.__setattr__(self, "db_path", self.home / "hve.db")
         # Create the directory parts only. Do NOT call mkdir on the db file
         # itself — that would create a *directory* named "hve.db" and
         # sqlite3.connect() would then fail with "unable to open database

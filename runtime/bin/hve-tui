@@ -1,0 +1,208 @@
+#!/usr/bin/env bash
+
+# =====================================================================
+# hve-tui — HVE Life OS alpha TUI launcher (DGX Spark)
+#
+# Contract:
+#   * Starts the standalone llama-server (CPU/NEON) on 127.0.0.1:8089
+#     if it is not already up — Ollama is NEVER used.
+#   * Runs the HVE CLI health check against the alpha environment.
+#   * Points Hermes at the local loopback model endpoint via a
+#     HERMES_HOME-contained profile (directory-contained: all HVE files
+#     stay under ~/hve-life-os; the skill copy is refreshed from the
+#     canonical repo checkout each launch, which is the only write
+#     outside ~/hve-life-os and is fully reversible via `git`).
+#   * Opens an interactive Hermes TUI preloaded with the hve-life-os
+#     skill, connected to the local model.
+#
+# Usage:
+#   hve-tui                     # interactive (needs a TTY)
+#   hve-tui --health            # health check only, no TUI
+#   hve-tui --smoke             # health + model + smoke ask
+#
+# Environment (override):
+#   HVE_LLM_ENDPOINT   default http://127.0.0.1:8089/v1
+#   HVE_MODEL_NAME     default Qwen3.8-2B-Distill-Q4_K_M
+#   HVE_HERMES_BIN     default /home/hans/.local/bin/hermes
+#   HVE_TUI_PROFILE    default hve-alpha
+#   HVE_TUI_CONTEXT    default 65536 (exact)
+#   HVE_TUI_MAXOUT     default 1024 (initial output bound)
+# =====================================================================
+# CANONICAL SOURCE: this file (runtime/bin/hve-tui in the repository).
+# The live deployment copy at ~/hve-life-os/runtime/bin/hve-tui is
+# generated from / installed from this file. If the live copy and this
+# file ever diverge, this file is authoritative. The first line MUST
+# remain the Bash shebang `#!` followed by `/usr/bin/env bash` —
+# several deployments of this launcher were lost to a mangled shebang
+# (e.g. written through `sh`/`dash` or a shell-quoted copy that
+# stripped the `#!`).
+# =====================================================================
+
+set -euo pipefail
+
+ROOT="$HOME/hve-life-os"
+REPO="/home/hans/humanvalueexchange/workspaces/hvelifeospoc"
+HERMES_BIN="${HVE_HERMES_BIN:-/home/hans/.local/bin/hermes}"
+LLAMA_SERVER="$ROOT/src/build/bin/llama-server"
+MODEL_PATH="$ROOT/models/Qwen3.8-2B-Distill-Q4_K_M.gguf"
+LLAMA_LOG="$ROOT/data/logs/llama-server.log"
+LLAMA_PIDFILE="$ROOT/data/logs/llama-server.pid"
+ENDPOINT="${HVE_LLM_ENDPOINT:-http://127.0.0.1:8089/v1}"
+MODEL_NAME="${HVE_MODEL_NAME:-Qwen3.8-2B-Distill-Q4_K_M}"
+PROFILE_NAME="${HVE_TUI_PROFILE:-hve-alpha}"
+# Hermes profile: registered under ~/.hermes/profiles (managed by `hermes
+# profile create`; the HVE overlay — this profile's config.yaml + the
+# hve-life-os skill — is refreshed from the canonical repo checkout on each
+# launch, which is the only write outside ~/hve-life-os and is fully
+# reversible and idempotent.)
+HERMES_PROFILES_DIR="$HOME/.hermes/profiles"
+SKILL_SRC="$REPO/hermes-skills/hve-life-os"
+HVE_PY="$ROOT/env/bin/python"
+HVE_APP="$ROOT/app"
+HVE_HOME_DATA="$ROOT/data"
+CTX="${HVE_TUI_CONTEXT:-65536}"
+MAXOUT="${HVE_TUI_MAXOUT:-1024}"
+
+log() { printf '[hve-tui] %s\n' "$*" >&2; }
+die() { log "ERROR: $*"; exit 1; }
+
+have() { command -v "$1" >/dev/null 2>&1; }
+
+# --- env sanity ----------------------------------------------------------
+[ -x "$HERMES_BIN" ]     || die "hermes binary not found at $HERMES_BIN (set HVE_HERMES_BIN)"
+[ -d "$SKILL_SRC" ]      || die "skill source missing: $SKILL_SRC"
+
+# --- model endpoint up? --------------------------------------------------
+model_up() {
+  curl -sf -m 5 -o /dev/null "$ENDPOINT/models" 2>/dev/null
+}
+
+start_model() {
+  log "llama-server not running; starting at $ENDPOINT (model=$MODEL_NAME)"
+  [ -x "$LLAMA_SERVER" ] || die "llama-server binary missing: $LLAMA_SERVER"
+  [ -f "$MODEL_PATH" ]   || die "model file missing: $MODEL_PATH"
+  mkdir -p "$(dirname "$LLAMA_LOG")"
+  nohup "$LLAMA_SERVER" \
+    --model  "$MODEL_PATH" \
+    --port   8089 \
+    --host   127.0.0.1 \
+    --ctx-size "$CTX" \
+    --parallel 1 \
+    --no-warmup \
+    >>"$LLAMA_LOG" 2>&1 &
+  local pid=$!
+  printf '%s' "$pid" > "$LLAMA_PIDFILE"
+  log "llama-server pid=$pid (log: $LLAMA_LOG)"
+  # Wait for the endpoint to come up (max ~120s).
+  local i
+  for i in $(seq 1 60); do
+    model_up && { log "model endpoint is up"; return 0; }
+    sleep 2
+  done
+  die "model endpoint did not come up within 120s — check $LLAMA_LOG"
+}
+
+if ! model_up; then
+  # Maybe a stale pid is around; ignore — we just start our own.
+  start_model
+else
+  log "model endpoint already up at $ENDPOINT"
+fi
+
+# --- HVE health ----------------------------------------------------------
+run_hve() {
+  (
+    export HVE_HOME="$HVE_HOME_DATA"
+    export HVE_DB_PATH="$HVE_HOME_DATA/hve.db"
+    export HVE_KNOWLEDGE_DIR="$HVE_HOME_DATA/knowledge"
+    export HVE_REPORTS_DIR="$HVE_HOME_DATA/reports"
+    export HVE_BACKUPS_DIR="$HVE_HOME_DATA/backups"
+    export HVE_MODEL_PATH="$MODEL_PATH"
+    export HVE_MODEL_ENDPOINT="$ENDPOINT"
+    export HVE_MODEL_NAME="$MODEL_NAME"
+    export HVE_MODEL_CONTEXT="$CTX"
+    export HVE_MAX_OUTPUT_TOKENS="$MAXOUT"
+    export HVE_HTTP_HOST=127.0.0.1
+    export HVE_HTTP_PORT=8090
+    export HVE_LAN=0
+    export HVE_HERMES_BIN="$HERMES_BIN"
+    export PYTHONPATH="$HVE_APP${PYTHONPATH:+:$PYTHONPATH}"
+    exec "$HVE_PY" -m hve "$@"
+  )
+}
+
+MODE="${1:---tui}"
+
+case "$MODE" in
+  --health)
+    run_hve health --json
+    exit $?
+    ;;
+  --smoke)
+    run_hve health --json
+    run_hve agent ask "Reply with exactly the words: HVE ALPHA OK"
+    exit $?
+    ;;
+  --tui)
+    ;;
+  *)
+    # Treat unknown args as: run them through the HVE CLI.
+    shift
+    run_hve "$@"
+    exit $?
+    ;;
+esac
+
+# --- Hermes profile (managed by hve-tui: idempotent refresh) --------------
+PROFILE_DIR="$HERMES_PROFILES_DIR/$PROFILE_NAME"
+[ -d "$PROFILE_DIR" ] || {
+  log "profile $PROFILE_NAME not found; creating..."
+  "$HERMES_BIN" profile create "$PROFILE_NAME" >/dev/null 2>&1 \
+    || die "could not create profile $PROFILE_NAME with: $HERMES_BIN profile create"
+}
+# Refresh the skill from the canonical repo checkout each launch so the TUI
+# always tracks the repo.
+mkdir -p "$PROFILE_DIR/skills/hve-life-os"
+cp -f "$SKILL_SRC/SKILL.md" "$PROFILE_DIR/skills/hve-life-os/SKILL.md"
+
+cat > "$PROFILE_DIR/config.yaml" <<YAML
+# HVE Life OS alpha — Hermes profile (managed by hve-tui; safe to edit,
+# changes are preserved on next launch only if you re-apply them — the
+# launcher regenerates this file from a pinned template each time).
+#
+# The context/output numbers below are the EXACT alpha contract:
+#   context = 65536 tokens (not 64448)
+#   max out = 1024 tokens (initial; bounded — bump only by explicit change)
+model:
+  provider: custom
+  default: $MODEL_NAME
+  base_url: "$ENDPOINT"
+  api_key: no-key-required
+  context_length: $CTX
+toolsets:
+  - hermes-cli
+  - terminal
+  - file
+  - code_execution
+  - web
+agent:
+  max_turns: 40
+  reasoning_effort: none
+terminal:
+  backend: local
+  cwd: $ROOT
+  timeout: 180
+YAML
+
+# --- Launch the interactive TUI ------------------------------------------
+log "launching hermes TUI (profile: $PROFILE_NAME, skill: hve-life-os)"
+cd "$ROOT"
+exec env \
+  HVE_HOME="$HVE_HOME_DATA" \
+  HVE_MODEL_ENDPOINT="$ENDPOINT" \
+  HVE_MODEL_NAME="$MODEL_NAME" \
+  HVE_MODEL_CONTEXT="$CTX" \
+  HVE_MAX_OUTPUT_TOKENS="$MAXOUT" \
+  "$HERMES_BIN" -p "$PROFILE_NAME" chat \
+        -s hve-life-os \
+        -t hermes-cli,terminal,file,code_execution,web

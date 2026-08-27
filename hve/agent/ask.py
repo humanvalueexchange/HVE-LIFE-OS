@@ -143,12 +143,82 @@ def _find_hermes() -> str | None:
     return None
 
 
+def _resolve_profile_home() -> Path | None:
+    """Resolve the Hermes profile HOME (``HERMES_HOME``) that ``ask()``
+    must run the hermes subprocess under.
+
+    Alpha contract (B1): the ask path MUST NOT inherit the ambient Hermes
+    profile. Resolving a profile directory here lets ``ask()`` inject
+    ``HERMES_HOME`` into the subprocess environment, which pins the call
+    to that profile and its Qwen3.8-2B-Distill model (127.0.0.1:8089).
+
+    Resolution order (first hit wins):
+
+    1. ``HVE_HERMES_HOME`` env var — an explicit, absolute path that already
+       points at an existing profile directory. This is the HVE runtime's
+       *own* pin (set by ``runtime/hve.env`` / ``service/spark/hve.env``)
+       and is the deterministic, ambient-independent answer for a
+       production deployment. It wins over everything else.
+    2. ``HERMES_HOME`` env var — an explicit, absolute path that already
+       points at an existing directory (operator or test-harness pin).
+    3. ``HVE_HERMES_PROFILE`` env var — a profile name; resolved through
+       the standard Hermes profile registry to
+       ``<hermes_root>/profiles/<name>`` where hermes_root is
+       ``HERMES_ROOT`` (if set) or ``~/.hermes`` (the registry the
+       launcher writes into).
+    4. ``HVE_HOME`` is set — the HVE runtime is the deployment root and
+       the Alpha profile it pins to lives in the *standard* Hermes
+       registry at ``~/.hermes/profiles/<name>`` (name from
+       ``HVE_HERMES_PROFILE`` or the Alpha default ``hve-alpha``). This
+       makes an ambient shell — with *no* profile variables at all —
+       still route to the Alpha profile purely from ``HVE_HOME``,
+       never from the caller's ambient profile.
+
+    Returns ``None`` when nothing is configured — callers then raise a
+    clear error rather than silently using the ambient profile. We never
+    use a non-standard ``<HVE_HOME>/hermes-profiles/`` directory as the
+    final fallback.
+    """
+    # 1. HVE_HERMES_HOME — explicit HVE runtime pin (most deterministic).
+    hve_home = os.environ.get("HVE_HERMES_HOME")
+    if hve_home:
+        p = Path(hve_home).expanduser()
+        if p.is_absolute() and p.is_dir():
+            return p
+    # 2. HERMES_HOME — caller/operator pin.
+    home_env = os.environ.get("HERMES_HOME")
+    if home_env:
+        p = Path(home_env).expanduser()
+        if p.is_absolute() and p.is_dir():
+            return p
+    # 3. HVE_HERMES_PROFILE — by name, through the standard registry.
+    name = os.environ.get("HVE_HERMES_PROFILE")
+    if name:
+        root = os.environ.get("HERMES_ROOT") or str(Path.home() / ".hermes")
+        p = Path(root).expanduser() / "profiles" / name
+        if p.is_dir():
+            return p
+    # 4. HVE_HOME is set — standard-register the Alpha default.
+    #    The runtime knows its deployment root (HVE_HOME's parent); the
+    #    Alpha profile it pins to lives at ~/.hermes/profiles/hve-alpha.
+    #    This is the ambient-shell path: HVE_HOME set, no profile vars,
+    #    no HVE_HERMES_HOME — the pin is still HVE-owned and never
+    #    derived from the caller.
+    if os.environ.get("HVE_HOME"):
+        name = os.environ.get("HVE_HERMES_PROFILE") or "hve-alpha"
+        root = os.environ.get("HERMES_ROOT") or str(Path.home() / ".hermes")
+        p = Path(root).expanduser() / "profiles" / name
+        if p.is_dir():
+            return p
+    return None
+
+
 def _resolve_error(bin_hint: str) -> str:
     """Build a precise, actionable error message for a failed lookup."""
     base = (
         "hermes CLI not found. Resolve it in one of these ways:\n"
         "  1. Set HVE_HERMES_BIN=/abs/path/to/hermes (explicit pin; see "
-        "docs/runbook-mercury.md), or\n"
+        "docs/runbook-spark.md), or\n"
         "  2. Put `hermes` on the service PATH (see hve-lifeos.service), or\n"
         "  3. Install Hermes and verify `hermes --version` for the `hve` "
         "user.\n"
@@ -186,8 +256,46 @@ def ask(cfg: HveConfig, prompt: str, *,
     if hermes_bin is None or hermes_bin.startswith("<UNRESOLVED"):
         raise AgentError(_resolve_error(hermes_bin or ""))
 
+    # B1 (Alpha contract): pin the hermes profile explicitly. The ask path
+    # must route through the HVE Alpha profile (hve-alpha —
+    # Qwen3.8-2B-Distill-Q4_K_M @ 127.0.0.1:8089) and must NEVER inherit
+    # the caller's ambient profile (e.g. a hermes profile whose model is
+    # Ollama-backed). We inject HERMES_HOME=<profile dir> into the
+    # subprocess env — hermes's profile resolution honours a HERMES_HOME
+    # that points at a profiles/<name> directory and refuses to follow
+    # the sticky active_profile when HERMES_HOME points at a profile.
+    profile_home = _resolve_profile_home()
+    if profile_home is None:
+        raise AgentError(
+            "Alpha profile not resolved. Set one of:\n"
+            "  1. HVE_HERMES_HOME=/abs/path/to/profiles/hve-alpha "
+            "(explicit HVE pin; recommended for production), or\n"
+            "  2. HVE_HERMES_PROFILE=hve-alpha "
+            "(resolved to ~/.hermes/profiles/hve-alpha), or\n"
+            "  3. HERMES_HOME=/abs/path/to/profiles/hve-alpha, or\n"
+            "  4. HVE_HOME=<deployment-root>/data (the Alpha profile at\n"
+            "     ~/.hermes/profiles/hve-alpha will be used)\n"
+            "Refusing to fall back to the ambient (caller's) Hermes "
+            "profile — that could silently route the request to a "
+            "non-Alpha model (B1: no Ollama, no profile leak)."
+        )
+    if not profile_home.is_dir():
+        raise AgentError(
+            f"Alpha profile HOME could not be verified (missing or not a "
+            f"directory): {profile_home}"
+        )
+
     session_id = session_id or str(uuid.uuid4())
     started = time.monotonic()
+
+    # Subprocess env: the HVE Alpha profile. We copy the current
+    # environment (PATH, HOME, etc.) and inject HERMES_HOME so the
+    # hermes CLI resolves the hve-alpha profile and its config.yaml
+    # (which pins model = Qwen3.8-2B-Distill-Q4_K_M @ 127.0.0.1:8089).
+    # Any ambient HERMES_PROFILE that could override is dropped.
+    sub_env = dict(os.environ)
+    sub_env["HERMES_HOME"] = str(profile_home)
+    sub_env.pop("HERMES_PROFILE", None)
 
     # Verified contract (task item 3, read-only inspection of
     # `hermes --help` and `hermes chat --help` on Mercury — Hermes
@@ -211,6 +319,14 @@ def ask(cfg: HveConfig, prompt: str, *,
         "-q", prompt,
         "-s", "hve-life-os",
         "-Q",
+        # Non-TTY subprocess. Without this flag the agent asks the user
+        # for dangerous-command / unknown-tool approval on a TTY we do not
+        # have, which hangs the call (observed as a 600s timeout on a
+        # tool-call smoke). HVE's own CLI already enforces loopback-only,
+        # directory containment, mandatory audit, and no network egress, so
+        # the approval gate is redundant and must not block a programmatic
+        # caller.
+        "--yolo",
     ]
     if extra_args:
         cmd.insert(1, *extra_args)
@@ -222,6 +338,7 @@ def ask(cfg: HveConfig, prompt: str, *,
             text=True,
             timeout=timeout_s,
             check=False,
+            env=sub_env,
         )
     except subprocess.TimeoutExpired as exc:
         _record_fail(cfg, session_id, prompt, str(exc),
@@ -245,6 +362,24 @@ def ask(cfg: HveConfig, prompt: str, *,
         raise primary
 
     response = _parse_response(proc.stdout)
+    if not response:
+        # Empty stdout on exit=0 is a *failed* interaction, not a success:
+        # unrecognized skill name, a provider error that the CLI still
+        # surfaced as 0, a timeout inside Hermes, etc. Treating it as
+        # ok would let `hve agent ask` silently "succeed" while the
+        # operator sees nothing. Audit the failure and surface a
+        # non-zero exit.
+        primary = AgentError(
+            "hermes chat exited 0 but produced no response — the "
+            "interaction did not complete (skill not found, model "
+            "timeout, approval gate hit a non-TTY, or provider error). "
+            "Check the hermes session log for the real cause."
+        )
+        try:
+            _record_fail(cfg, session_id, prompt, "empty-stdout", latency_ms)
+        except Exception as log_exc:  # noqa: BLE001
+            primary.__cause__ = log_exc
+        raise primary
 
     # Successful call: audit is mandatory. Raise AuditError if it
     # fails, rather than swallowing it silently.

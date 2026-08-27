@@ -29,8 +29,48 @@ def hve_home(tmp_path: Path) -> Path:
     return home
 
 
+def _make_fake_alpha_profile(root: Path) -> Path:
+    """Create a minimal, valid ``profiles/hve-alpha`` directory.
+
+    The :func:`hve.agent.ask._resolve_profile_home` resolver only requires
+    the directory to exist (it reads HERMES_HOME / HVE_HERMES_PROFILE to
+    compute the target path, then checks ``is_dir``). A real hermes
+    profile's config.yaml is not needed for those checks; we still write
+    a marker file so the fixture is self-documenting.
+    """
+    profiles = root / "profiles"
+    p = profiles / "hve-alpha"
+    p.mkdir(parents=True, exist_ok=True)
+    (p / "config.yaml").write_text(
+        "# test-only fake Alpha profile marker\n"
+        "model:\n"
+        "  name: Qwen3.8-2B-Distill-Q4_K_M\n"
+        "  base_url: http://127.0.0.1:8089/v1\n",
+        encoding="utf-8",
+    )
+    return p
+
+
 @pytest.fixture()
-def cfg(hve_home: Path):
+def alpha_profile_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Pin the Alpha profile for the duration of a test.
+
+    Sets ``HERMES_HOME`` to a fresh ``<tmp>/profiles/hve-alpha`` and
+    ``HVE_HERMES_PROFILE`` to the same profile name (so the
+    :func:`_resolve_profile_home` resolver has both resolution paths
+    available and returns the same directory either way).
+
+    The directory is cleaned up by pytest's tmp_path fixture when the
+    test finishes; the env vars are restored by monkeypatch.
+    """
+    p = _make_fake_alpha_profile(tmp_path)
+    monkeypatch.setenv("HERMES_HOME", str(p))
+    monkeypatch.setenv("HVE_HERMES_PROFILE", "hve-alpha")
+    return p
+
+
+@pytest.fixture()
+def cfg(hve_home: Path, alpha_profile_env: Path):
     """An :class:`HveConfig` rooted at the isolated home."""
     from hve.config import HveConfig
     import os as _os

@@ -70,7 +70,7 @@ def test_env_pin_missing_raises_clear_error(tmp_path, monkeypatch, cfg):
     assert "HVE_HERMES_BIN" in msg
     assert str(missing) in msg                      # offending path named
     assert "not usable" in msg                       # reason
-    assert "docs/runbook-mercury.md" in msg          # actionable pointer
+    assert "docs/runbook-spark.md" in msg            # actionable pointer (Spark)
 
 
 def test_env_pin_not_executable_treated_as_missing(tmp_path, monkeypatch, cfg):

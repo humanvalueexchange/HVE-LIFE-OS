@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Optional
@@ -51,6 +52,9 @@ def build_parser() -> argparse.ArgumentParser:
         description="HVE Life OS CLI (Mercury alpha).",
         epilog=_epilog(),
         add_help=False,
+        # Strict long-option matching: a prompt like "hello world" or a bare
+        # token must never be swallowed by abbreviation matching.
+        allow_abbrev=False,
     )
     p.add_argument("-h", "--help", action="help",
                    help="show this help message and exit")
@@ -81,19 +85,38 @@ def build_parser() -> argparse.ArgumentParser:
     p_health.add_argument("--json", action="store_true",
                           help="Emit JSON")
 
-    # agent
-    p_agent = sub.add_parser("agent", help="Interact with the local Hermes CLI")
-    p_agent.add_argument("command", nargs="?", default="ask",
-                         choices=["ask"])
-    p_agent.add_argument("prompt", nargs="?", default=None)
-    p_agent.add_argument("--session", default=None,
-                         help="Session id to tag the interaction with")
+    # agent — a greedy positional for the prompt keeps multi-word prompts
+    # (and tool-call smoke strings like
+    #   "Use the terminal tool to run /path/hve status --json, then ..."
+    # ) out of argparse's abbreviation/choice matching. Optional flags
+    # before the prompt are still parsed as flags; tokens after the
+    # first positional are all collected into the prompt list.
+    p_agent = sub.add_parser(
+        "agent",
+        help="Interact with the local Hermes CLI",
+        allow_abbrev=False,
+    )
+    p_agent.add_argument("prompt", nargs="*", default=[],
+                         help="Prompt to send (one or more tokens; will be joined by single spaces). "
+                              "Empty = read from stdin (existing behavior).")
     p_agent.add_argument("--bin", default=None,
                          help="Explicit path to the hermes binary")
+    p_agent.add_argument("--session", default=None,
+                         help="Session id to tag the interaction with")
     p_agent.add_argument("--timeout", type=int, default=600,
                          help="Subprocess timeout (seconds)")
     p_agent.add_argument("--list-recent", type=int, default=None,
                          help="Show the N most recent interactions and exit")
+
+    # serve
+    p_serve = sub.add_parser(
+        "serve",
+        help="Run the loopback HTTP service (127.0.0.1:8090)",
+    )
+    p_serve.add_argument("--host", default=None,
+                         help="Bind host (must be loopback; default from config)")
+    p_serve.add_argument("--port", type=int, default=None,
+                         help="Bind port (default from config, 8090)")
 
     # db
     p_db = sub.add_parser("db", help="Back up / restore the SQLite database")
@@ -135,6 +158,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "agent":
         return cmd_agent(cfg, args)
+
+    if args.command == "serve":
+        return cmd_serve(cfg, args)
 
     if args.command == "db":
         return cmd_db(cfg, args)
@@ -242,6 +268,14 @@ def cmd_agent(cfg: HveConfig, args: argparse.Namespace) -> int:
             print("error: provide a prompt (positional) or pipe one to stdin")
             return 2
         args.prompt = sys.stdin.read().strip()
+    elif isinstance(args.prompt, list):
+        # Greedy `nargs='*'` collected every trailing token into a list.
+        # For backward compat, a leading bare "ask" token (the old
+        # `hve agent ask <PROMPT>` form) is stripped before joining.
+        tokens = list(args.prompt)
+        if tokens and tokens[0] == "ask":
+            tokens = tokens[1:]
+        args.prompt = " ".join(tokens)
     if not args.prompt:
         print("error: empty prompt")
         return 2
@@ -288,6 +322,49 @@ def cmd_db(cfg: HveConfig, args: argparse.Namespace) -> int:
         return 0
     print(f"unknown db action: {args.action}", file=sys.stderr)
     return 2
+
+
+def cmd_serve(cfg: HveConfig, args: argparse.Namespace) -> int:
+    """Start the loopback HTTP service (127.0.0.1:cfg.http_port).
+
+    Delegates to :mod:`hve.serve.loop` (the single existing service
+    implementation) — we do NOT open a second socket. To honour the
+    operator's ``--host``/``--port`` overrides without duplicating the
+    serve loop, we publish them as ``HVE_HTTP_HOST``/``HVE_HTTP_PORT``
+    and let ``loop.main()`` read them through :func:`hve.config.load`.
+
+    The config's :meth:`HveConfig.__post_init__` refuses a non-loopback
+    host, so a bad ``--host`` fails loudly before any socket is opened.
+    """
+    host = args.host or cfg.http_host
+    port = args.port if args.port is not None else cfg.http_port
+    if host not in {"127.0.0.1", "localhost", "::1"}:
+        print(
+            f"error: HVE serve must bind a loopback host (got {host!r}); "
+            "LAN exposure requires a separate approved design",
+            file=sys.stderr,
+        )
+        return 2
+    if args.host is not None:
+        os.environ["HVE_HTTP_HOST"] = host
+    if args.port is not None:
+        os.environ["HVE_HTTP_PORT"] = str(port)
+
+    from .serve import loop as serve_loop
+    return serve_loop.main()
+
+
+def serve_command() -> int:
+    """Run ``hve serve`` — the loopback HTTP service on cfg.http_host:port.
+
+    Delegates to :mod:`hve.serve.loop`, which builds the
+    :class:`HveConfig` (loopback-only enforced by the config), starts the
+    ThreadingHTTPServer in a worker thread, and blocks forever on SIGINT/
+    SIGTERM. The operator-facing subcommand is a thin wrapper so the CLI
+    parser and the blocking serve loop stay cleanly separated.
+    """
+    from .serve import loop as serve_loop
+    return serve_loop.main()
 
 
 if __name__ == "__main__":

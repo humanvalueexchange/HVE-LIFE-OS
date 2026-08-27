@@ -50,8 +50,16 @@ def _fail(name: str, detail: str) -> ComponentHealth:
     return ComponentHealth(name, "fail", detail)
 
 
-def check(cfg: HveConfig) -> dict[str, Any]:
-    """Run all component checks and return a dict (JSON-serializable)."""
+def check(cfg: HveConfig, *, no_http_probe: bool = False) -> dict[str, Any]:
+    """Run all component checks and return a dict (JSON-serializable).
+
+    ``no_http_probe=True`` tells the 5b step to skip the ``http_service``
+    self-probe. The HTTP handler passes this when it is already *inside*
+    the service (``/healthz`` request → ``check()`` → ``socket.create_connection``
+    to the same port the handler is bound to). Without this flag the handler
+    would open a new connection to its own listening socket and time out
+    (re-entrancy), reporting a false WARN.
+    """
     out: dict[str, Any] = {"ok": True, "checks": []}
 
     def add(c: ComponentHealth) -> None:
@@ -120,6 +128,46 @@ def check(cfg: HveConfig) -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001
         add(_warn("model", f"endpoint unreachable (expected in dev): {exc.__class__.__name__}"))
 
+    # 5b. HVE HTTP service on cfg.http_port (8090 by default).
+    #
+    # This check is SEPARATE from the model check above: it probes the
+    # *HVE loopback HTTP service* (/healthz), not the llama.cpp model
+    # endpoint. The service is operator-managed (start-hve.sh /
+    # `hve serve`) and is intentionally stopped in many developer flows,
+    # so an unreachable service is a WARN — it surfaces in `hve health
+    # --json` and `hve-tui --health` without failing the overall check.
+    # A *listening but failing* service (503) is a FAIL.
+    if cfg.http_port and not no_http_probe:  # port 0 (test/dynamic) skips the probe
+        try:
+            host = cfg.http_host or "127.0.0.1"
+            with socket.create_connection((host, cfg.http_port), timeout=1):
+                listening = True
+        except OSError:
+            listening = False
+        if not listening:
+            add(_warn(
+                "http_service",
+                f"not listening on {host}:{cfg.http_port} (run `hve serve` "
+                f"or runtime/bin/start-hve.sh before demo)",
+            ))
+        else:
+            try:
+                import urllib.error as _urllib_error
+                import urllib.request
+                url = f"http://{host}:{cfg.http_port}/healthz"
+                req = urllib.request.Request(url, headers={"Accept": "application/json"})
+                with urllib.request.urlopen(req, timeout=2) as resp:  # noqa: S310
+                    if 200 <= resp.status < 300:
+                        add(_ok("http_service", f"GET {url} -> {resp.status}"))
+                    else:
+                        add(_fail("http_service", f"GET {url} -> {resp.status}"))
+            except _urllib_error.HTTPError as exc:  # noqa: BLE001
+                add(_fail("http_service", f"GET -> HTTP {exc.code} (service up but unhealthy)"))
+            except Exception as exc:  # noqa: BLE001
+                add(_warn("http_service",
+                          f"listening on {host}:{cfg.http_port} but /healthz "
+                          f"errored: {exc.__class__.__name__}"))
+
     # 6. last report
     rep = cfg.reports_html
     if rep.exists():
@@ -135,8 +183,15 @@ def check(cfg: HveConfig) -> dict[str, Any]:
     return out
 
 
-def status(cfg: HveConfig) -> dict[str, Any]:
-    """Return the richer ``/status.json`` snapshot."""
+def status(cfg: HveConfig, *, no_http_probe: bool = False) -> dict[str, Any]:
+    """Return the richer ``/status.json`` snapshot.
+
+    ``no_http_probe=True`` is passed through to :func:`check` so the
+    embedded health block does not probe the HTTP service it is being
+    served from (same re-entrancy guard as ``/healthz``). External callers
+    (curl, ``hve health``) leave it at the default ``False`` and get the
+    live 8090 probe.
+    """
     rep_md = cfg.reports_md.exists()
     rep_html = cfg.reports_html.exists()
     # Real applied migration data (task item 4 — no placeholder).
@@ -171,7 +226,7 @@ def status(cfg: HveConfig) -> dict[str, Any]:
             "uid": os.getuid(),
             "http": f"{cfg.http_host}:{cfg.http_port}",
         },
-        "health": check(cfg),
+        "health": check(cfg, no_http_probe=no_http_probe),
     }
 
 
@@ -232,10 +287,16 @@ class HveRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         path = self.path
         if path == "/healthz":
-            result = check(self.server.hve_config)
+            result = check(self.server.hve_config, no_http_probe=True)
             self._send_json(200 if result["ok"] else 503, result)
         elif path == "/status.json":
-            self._send_json(200, status(self.server.hve_config))
+            # The /status.json endpoint serves the snapshot *in-process*; the
+            # embedded health block must not probe the listening socket we
+            # are already handling (same re-entrancy guard as /healthz).
+            # External callers (curl, `hve health`) still execute the live
+            # 8090 http_service check by default.
+            self._send_json(200,
+                            status(self.server.hve_config, no_http_probe=True))
         elif path in ("/report", "/report.html", "/"):
             p = self.server.hve_config.reports_html
             if not p.exists():
@@ -268,13 +329,12 @@ class HveServer(ThreadingHTTPServer):
 def serve(cfg: HveConfig, *, block: bool = True) -> HveServer:
     """Start the loopback HTTP service.
 
-    ``block=False`` is used from tests: it returns the server after
-    binding so the caller may probe it from another thread.
+    With ``http_port=0`` (test/dynamic mode) the OS assigns a real port;
+    read it from ``server.server_address[1]`` after binding.
     """
     server = HveServer((cfg.http_host, cfg.http_port), cfg)
     if not block:
         import threading
-        t = threading.Thread(target=server.serve_forever, daemon=True)
-        t.start()
+        threading.Thread(target=server.serve_forever, daemon=True).start()
     server._cfg = cfg  # type: ignore[attr-defined]
     return server
