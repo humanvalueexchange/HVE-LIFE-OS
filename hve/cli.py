@@ -42,14 +42,15 @@ from .migrations import manager as mig_manager
 def _epilog() -> str:
     return (
         "HVE Life OS — local-first Personal Sovereignty Operating System.\n"
-        "Mercury alpha. No cloud dependency. Run as the `hve` service user.\n"
+        "Alpha v1 reference target: directory-contained DGX Spark. "
+        "No cloud or Ollama dependency.\n"
     )
 
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="hve",
-        description="HVE Life OS CLI (Mercury alpha).",
+        description="HVE Life OS CLI (Alpha v1).",
         epilog=_epilog(),
         add_help=False,
         # Strict long-option matching: a prompt like "hello world" or a bare
@@ -135,7 +136,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv if argv is not None else None)
 
     if getattr(args, "version", False):
-        print("hve 0.1.0 (Mercury alpha)")
+        print("hve 0.1.0 (Alpha v1; DGX Spark reference)")
         return 0
 
     if not args.command:

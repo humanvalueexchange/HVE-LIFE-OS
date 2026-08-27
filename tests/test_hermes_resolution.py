@@ -1,7 +1,7 @@
 """Focused tests for Hermes binary resolution (loop item 1).
 
 Covers the full resolution ladder in ``hve/agent/ask.py`` without
-depending on the real Mercury runtime:
+depending on the real reference runtime:
 
 * explicit ``HVE_HERMES_BIN`` pin is authoritative (preferred)
 * a *pinned* path that is missing/not-executable raises a clear error
@@ -73,6 +73,7 @@ def test_env_pin_missing_raises_clear_error(tmp_path, monkeypatch, cfg):
     assert "docs/runbook-spark.md" in msg            # actionable pointer (Spark)
 
 
+
 def test_env_pin_not_executable_treated_as_missing(tmp_path, monkeypatch, cfg):
     """Existing but non-executable file is NOT a usable binary."""
     not_exec = tmp_path / "hermes"
@@ -119,7 +120,7 @@ def test_fallback_locations_are_last_resort(tmp_path, monkeypatch, cfg):
 
 
 def test_no_hardcoded_herms_user_path(tmp_path, monkeypatch, cfg):
-    """Loop item 1: the old Mercury-only /home/hermes hardcode is gone.
+    """The old host-only /home/hermes hardcode is gone.
 
     We point the resolver at an EMPTY candidate list and a PATH with no
     hermes, and assert that resolution does NOT magically return a
@@ -136,8 +137,8 @@ def test_no_hardcoded_herms_user_path(tmp_path, monkeypatch, cfg):
         return  # expected: clean failure
     assert "/home/hermes" not in resolved, (
         "resolver still returned a hard-coded /home/hermes path "
-        f"({resolved}); that Mercury-only absolute path must not be "
-        "special-cased (item 1: portability)"
+        f"({resolved}); that host-only absolute path must not be "
+        "special-cased (portability)"
     )
 
 

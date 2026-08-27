@@ -3,6 +3,10 @@
 Mercury Node CLI — v0.5.5
 Terminal-native control for your sovereign Bitcoin Lightning node.
 
+Historical/experimental Mercury artifact. This CLI is preserved for
+reference and is not part of the active HVE Life OS runtime; its provider
+settings must not be treated as HVE dependencies.
+
 Usage:
   mercury status                       Node health at a glance
   mercury channels                     Lightning channel overview

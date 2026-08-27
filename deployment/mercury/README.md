@@ -1,4 +1,9 @@
-# Mercury Alpha Deployment
+# PARKED / EXPERIMENTAL — Mercury Alpha Deployment
+
+> Historical Mercury Raspberry Pi deployment profile. Preserved for
+> rollback, comparison, and future edge-adapter work. It is **not** the
+> active Alpha v1 target; use the DGX Spark reference contract in
+> `deployment/manifest.yaml` and `docs/architecture-spark.md`.
 
 This profile runs HVE Life OS on the minimum portable target: an ARM64
 Raspberry Pi using local `llama.cpp` inference and a quantized Qwen2.5 3B

@@ -1,5 +1,8 @@
 # Mercury Node 🪐
 
+> **Historical/experimental Mercury artifact.** Preserved for reference;
+> Mercury is not the active HVE Life OS Alpha v1 target.
+
 **The world's simplest AI-first Bitcoin Lightning node.**
 
 Buy a Raspberry Pi 5 (16GB) + Hailo-8L Hat. Run one command. Get a fully sovereign, AI-powered Bitcoin node with an intelligent agent living inside it — working for you 24/7.
@@ -70,7 +73,7 @@ rebalancing 30,000 SAT to restore routing balance.
 
 **Estimated BOM cost: ~$250–300 USD**
 
-> Full hardware assembly guide with photos: [docs/hardware-assembly.md](docs/hardware-assembly.md)
+> The full hardware assembly guide is not included in this repository snapshot.
 
 ---
 

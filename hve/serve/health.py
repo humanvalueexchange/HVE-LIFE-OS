@@ -10,7 +10,7 @@ Loopback-only HTTP service (Issue #1 D3=B, D7=B):
 
 The host is validated by :class:`hve.config.HveConfig` to be
 ``127.0.0.1`` / ``localhost`` / ``::1`` — the service is not intended
-to be reachable from outside Mercury.
+to be reachable outside the local host.
 """
 
 from __future__ import annotations
@@ -217,8 +217,13 @@ def status(cfg: HveConfig, *, no_http_probe: bool = False) -> dict[str, Any]:
             "report.html": rep_html,
         },
         "model": {
+            "name": cfg.model_name,
+            "backend": cfg.model_backend,
             "endpoint": cfg.model_endpoint,
             "context_tokens": cfg.model_context_tokens,
+            "max_output_tokens": cfg.model_max_output_tokens,
+            "path": str(cfg.model_path) if cfg.model_path else None,
+            "sha256": cfg.model_checksum,
         },
         "env": {
             "python": platform.python_version(),

@@ -83,11 +83,12 @@ def _candidate_paths() -> list[Path]:
     ``HVE_HERMES_BIN`` env var or a ``hermes`` on PATH. They are
     checked in order; the first that exists AND is executable wins.
 
-    We deliberately do NOT hardcode a single Mercury-only absolute path.
-    The correct, portable way to pin the binary on Mercury is one of:
+    We deliberately do NOT hardcode a single host-only absolute path.
+    The correct, portable way to pin the binary on the Spark reference
+    deployment is one of:
 
-    * ``HVE_HERMES_BIN=/home/hve/.local/bin/hermes`` (explicit env), or
-    * a ``hermes`` shim on the service ``PATH`` (see the systemd unit).
+    * ``HVE_HERMES_BIN=/home/hans/.local/bin/hermes`` (explicit env), or
+    * a ``hermes`` shim on the active runtime ``PATH``.
 
     (Hermes's local CLI typically lives at ``~/.local/bin/hermes``. The
     pre-m3 fix also probed ``~/.hermes/venv/bin/hermes`` — that was a
@@ -220,6 +221,7 @@ def _resolve_error(bin_hint: str) -> str:
         "  1. Set HVE_HERMES_BIN=/abs/path/to/hermes (explicit pin; see "
         "docs/runbook-spark.md), or\n"
         "  2. Put `hermes` on the service PATH (see hve-lifeos.service), or\n"
+
         "  3. Install Hermes and verify `hermes --version` for the `hve` "
         "user.\n"
     )
@@ -298,7 +300,8 @@ def ask(cfg: HveConfig, prompt: str, *,
     sub_env.pop("HERMES_PROFILE", None)
 
     # Verified contract (task item 3, read-only inspection of
-    # `hermes --help` and `hermes chat --help` on Mercury — Hermes
+    # `hermes --help` and `hermes chat --help` on the reference runtime —
+    # Hermes
     # Agent v0.20.5):
     #
     #   hermes chat -q "<prompt>" -s hve-life-os -Q

@@ -1,5 +1,8 @@
 # Mercury Node Source Snapshot
 
+> **Historical/experimental artifact.** Preserved as a Mercury source
+> snapshot; it is not the active HVE Life OS deployment.
+
 This directory is a vendored, source-only snapshot of the private
 `humanvalueexchange/mercury-node` repository for HVE Life OS deployment
 planning and review. The CLI file also contains the reviewed Mercury-host

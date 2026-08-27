@@ -11,6 +11,7 @@ release_channel: alpha
 # No HVE files in /usr/bin, /etc, /opt, system Python, or system services.
 # Ollama is NOT in the HVE dependency graph.
 
+
 upstream:
   name: NousResearch/hermes-agent
   pinned: true
@@ -37,6 +38,7 @@ model:
   # value above (artifact present at the source path under ~/models/3rdparty/
   # qwen3.8/2b/). Re-verification command in docs/runbook-spark.md.
 
+
 # ── Deployment root ──────────────────────────────────────────────────
 deployment_root: ~/hve-life-os
 runtime:
@@ -53,6 +55,7 @@ targets:
   mercury:
     status: experimental         # PARKED — edge target; files preserved
     path: deployment/mercury
+
   ubuntu-windows:
     status: planned
   macos:
@@ -65,3 +68,4 @@ overlay:
   # (patches/hermes-context-floor.patch) is archived, not active.
   system_manager: standalone     # Spark; Mercury used systemd (parked)
   loopback_only: true
+

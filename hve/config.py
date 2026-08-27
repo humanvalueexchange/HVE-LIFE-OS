@@ -1,17 +1,12 @@
 """HVE Life OS configuration.
 
 All runtime paths are resolved from environment variables so the same code
-runs on Mercury (dedicated ``hve`` user) and on developer machines
-(``hermes`` user or a plain CLI session). No secrets are read here.
+works in the directory-contained DGX Spark reference deployment and in
+isolated development homes. No secrets are read here.
 
-Defaults map to the Mercury runtime contract from Issue #1 (D5, D6):
-
-* home directory   : ``~/.hve``                (dedicated ``hve`` service user)
-* SQLite db path   : ``~/.hve/data/hve.db``
-* knowledge dir    : ``~/.hve/knowledge``      (real Customer Zero data; never Git)
-* report dir       : ``~/.hve/reports``
-* backup dir       : ``~/.hve/backups``
-* loopback listen  : ``127.0.0.1:8090``
+The Spark runtime sets ``HVE_HOME=/home/hans/hve-life-os/data`` and keeps
+SQLite, Markdown, reports, logs, and backups under that directory. Generic
+development defaults remain under ``~/.hve``.
 """
 
 from __future__ import annotations
@@ -32,6 +27,13 @@ FIVE_WEALTH_DOMAINS: tuple[str, ...] = (
 #: Default loopback health/report service port.
 DEFAULT_HTTP_PORT = 8090
 DEFAULT_LOOPBACK_HOST = "127.0.0.1"
+DEFAULT_MODEL_NAME = "Qwen3.8-2B-Distill-Q4_K_M"
+DEFAULT_MODEL_BACKEND = "llama.cpp-cpu-neon"
+DEFAULT_MODEL_CONTEXT = 65536
+DEFAULT_MAX_OUTPUT_TOKENS = 1024
+DEFAULT_MODEL_CHECKSUM = (
+    "4aa0fb13c431514262f259d420ecc95a8714df58ac2a2384514e20b93983f0ff"
+)
 
 DEFAULT_SCHEMA_VERSION = 1
 
@@ -77,6 +79,17 @@ def _env_path(
     return default
 
 
+def _configured_home() -> Path:
+    return _env_path("HVE_HOME", Path.home() / ".hve")
+
+
+def _default_db_path() -> Path:
+    configured_home = _configured_home()
+    if os.environ.get("HVE_HOME"):
+        return configured_home / "hve.db"
+    return configured_home / "data" / "hve.db"
+
+
 @dataclass(frozen=True)
 class HveConfig:
     """Immutable runtime configuration.
@@ -103,18 +116,42 @@ class HveConfig:
     )
     backups_dir: Path = field(
         default_factory=lambda: _env_path("HVE_BACKUPS_DIR", None)
+
     )
     http_host: str = field(default_factory=lambda: os.environ.get("HVE_HTTP_HOST", DEFAULT_LOOPBACK_HOST))
     http_port: int = field(
         default_factory=lambda: _env_int("HVE_HTTP_PORT", DEFAULT_HTTP_PORT)
     )
 
-    # Model backend (loopback-only on Mercury).
+    # Model backend (loopback-only on the Spark reference deployment).
     model_endpoint: str = field(
         default_factory=lambda: os.environ.get("HVE_MODEL_ENDPOINT", "http://127.0.0.1:8089/v1")
     )
+    model_backend: str = field(
+        default_factory=lambda: os.environ.get(
+            "HVE_MODEL_BACKEND", DEFAULT_MODEL_BACKEND
+        )
+    )
     model_context_tokens: int = field(
-        default_factory=lambda: _env_int("HVE_MODEL_CONTEXT", 8192)
+        default_factory=lambda: _env_int("HVE_MODEL_CONTEXT", DEFAULT_MODEL_CONTEXT)
+    )
+    model_name: str = field(
+        default_factory=lambda: os.environ.get("HVE_MODEL_NAME", DEFAULT_MODEL_NAME)
+    )
+    model_max_output_tokens: int = field(
+        default_factory=lambda: _env_int("HVE_MAX_OUTPUT_TOKENS", DEFAULT_MAX_OUTPUT_TOKENS)
+    )
+    model_path: Path | None = field(
+        default_factory=lambda: (
+            Path(os.environ["HVE_MODEL_PATH"]).expanduser()
+            if os.environ.get("HVE_MODEL_PATH")
+            else None
+        )
+    )
+    model_checksum: str = field(
+        default_factory=lambda: os.environ.get(
+            "HVE_MODEL_SHA256", DEFAULT_MODEL_CHECKSUM
+        )
     )
 
     # Reporting (D9: hourly, idempotent).

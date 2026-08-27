@@ -84,7 +84,7 @@ def cfg(hve_home: Path, alpha_profile_env: Path):
         http_host="127.0.0.1",
         http_port=0,
         model_endpoint="http://127.0.0.1:8999/v1",
-        model_context_tokens=8192,
+        model_context_tokens=65536,
     )
     for d in (c.home, c.knowledge_dir, c.reports_dir, c.backups_dir,
               c.home / "data"):

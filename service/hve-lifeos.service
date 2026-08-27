@@ -1,3 +1,7 @@
+# PARKED / EXPERIMENTAL — legacy Mercury systemd template.
+# The active reference runtime is directory-contained at /home/hans/hve-life-os
+# and is launched by its runtime-owned scripts.
+
 [Unit]
 Description=HVE Life OS — Five-Wealth local service (Mercury alpha)
 After=network.target

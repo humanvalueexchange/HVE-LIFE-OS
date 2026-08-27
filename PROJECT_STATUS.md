@@ -64,3 +64,4 @@ context 65,536 / initial output 1,024; a plain exchange against
 - Personal data lives in `~/hve-life-os/data/knowledge/`, **never in Git**.
 - Rollback = restore prior release + (optionally) prior SQLite snapshot
   (`--i-understand`). See `docs/rollback-spark.md`.
+

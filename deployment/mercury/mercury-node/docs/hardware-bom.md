@@ -1,5 +1,8 @@
 # Mercury Node — Hardware Bill of Materials
 
+> **Historical/experimental Mercury hardware record.** This is not the
+> current HVE Life OS deployment target.
+
 **Version:** 1.0  
 **Last updated:** 2026-05-16  
 **Estimated total cost:** ~$250–320 USD
@@ -73,7 +76,8 @@ The 27W official Pi 5 PSU is required for stable operation with NVMe + Hailo act
 
 ## Assembly Guide
 
-See [docs/hardware-assembly.md](hardware-assembly.md) for step-by-step photos and assembly instructions.
+The step-by-step photo assembly guide is not included in this repository
+snapshot.
 
 ---
 

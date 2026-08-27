@@ -1,77 +1,135 @@
 # HVE Life OS
 
-HVE Life OS is a local-first Personal Sovereignty Operating System. The
-project starts on the Mercury Raspberry Pi alpha node and is designed to
-remain portable to Ubuntu on Windows and macOS.
+HVE Life OS is a local-first Personal Sovereignty OS built on the Five
+Wealth Framework: **Time, Physical, Mental, Social, and Financial** wealth.
+It keeps personal data and the core interaction loop local while making
+wealth visible, measurable, and actionable.
 
-## Runtime model
+## Current Alpha v1 target
 
-HVE Life OS is built on top of the upstream
-[NousResearch Hermes Agent](https://github.com/NousResearch/hermes-agent).
-The application repository does not vendor the upstream Hermes source. It
-contains the HVE overlay, deployment contract, model profile, and
-Mercury-specific changes required to keep the system lean.
+The active reference deployment is the directory-contained DGX Spark runtime:
 
 ```text
-Pinned Nous Hermes
-        |
-        +-- HVE configuration and skills
-        +-- llama.cpp OpenAI-compatible endpoint
-        +-- Qwen2.5 3B GGUF model
-        +-- HVE Life OS application
-        |
-        +-- Mercury Raspberry Pi alpha
+/home/hans/hve-life-os/
+├── app/       # HVE application checkout used by the runtime
+├── data/      # SQLite, knowledge, reports, logs, and backups
+├── models/    # verified local GGUF artifact
+├── runtime/   # environment and operator launchers
+└── src/       # native llama.cpp build
 ```
 
-## Initial target: Mercury minimum profile
+This Git repository is the source and deployment contract. It is separate
+from the reference runtime directory; editing this checkout does not change
+the live runtime.
 
-| Component | Alpha choice |
+## Runtime contract
+
+| Component | Current contract |
 |---|---|
-| Hardware | Raspberry Pi 5, 8 GB minimum; 16 GB preferred |
-| Inference | `llama.cpp` over a local OpenAI-compatible endpoint |
-| Model | Qwen2.5 3B Instruct, `Q4_K_M` GGUF |
-| Context | 8,192 tokens |
-| Data | Markdown files and SQLite |
-| Service manager | systemd |
-| Network dependency | None for core operation |
+| Host | DGX Spark reference deployment (aarch64) |
+| Inference | Native `llama.cpp`, CPU/NEON; **not CUDA** |
+| Model | `Qwen3.8-2B-Distill-Q4_K_M` GGUF |
+| Model SHA-256 | `4aa0fb13c431514262f259d420ecc95a8714df58ac2a2384514e20b93983f0ff` |
+| Context | Exactly `65536` tokens |
+| Initial output cap | `1024` tokens |
+| Model endpoint | `http://127.0.0.1:8089/v1` |
+| HVE HTTP service | `http://127.0.0.1:8090` |
+| Persistence | SQLite and Markdown under `HVE_HOME` |
+| Network policy | Loopback-only; no cloud dependency |
+| Ollama | Prohibited/off-limits; not a dependency |
 
-The 8K profile is an intentional portability baseline, not a permanent
-product limit.
+See [`deployment/manifest.yaml`](deployment/manifest.yaml) and
+[`docs/architecture-spark.md`](docs/architecture-spark.md) for the
+machine-readable and narrative contracts.
+
+## Architecture
+
+```text
+Hermes profile (hve-alpha)
+        │ hve-life-os skill
+        ▼
+HVE CLI / operator TUI ───────► HVE HTTP service :8090
+        │                              │
+        │ local OpenAI-compatible      ├── healthz / status.json / report
+        ▼                              ▼
+native llama.cpp :8089          SQLite + Five Wealth data
+        │
+Qwen3.8-2B-Distill-Q4_K_M
+```
+
+The HVE skill is the canonical interaction path. The reference runtime
+supports health checks, the local model endpoint, the HVE service, Hermes
+skill/plain/tool-call paths, and an operator TUI. The repository itself
+contains the HVE CLI/service and skill contract; runtime-only launchers are
+kept under `/home/hans/hve-life-os/runtime/bin/`.
+
+## Quick start on the reference runtime
+
+Run these commands on the DGX Spark host, from the reference directory:
+
+```bash
+cd /home/hans/hve-life-os
+source runtime/hve.env
+runtime/bin/start-model.sh
+runtime/bin/start-hve.sh
+runtime/bin/hve-tui --health
+curl -s http://127.0.0.1:8090/healthz
+curl -s http://127.0.0.1:8090/status.json
+```
+
+Use `runtime/bin/hve-tui --smoke` for the local model plus HVE smoke path, or
+run `runtime/bin/hve-tui` for the interactive operator TUI. These launchers
+must remain loopback-only and must not be replaced with Ollama.
 
 ## Repository layout
 
 ```text
-HVE_Life_OS_Agent_Organization_Charter_v0.4.md
-deployment/
-  mercury/
-    README.md
-    hermes-config.yaml
-  manifest.yaml
-patches/
-  hermes-context-floor.patch
+AGENTS.md                         contributor and safety guardrails
+deployment/manifest.yaml          active Alpha v1 runtime contract
+docs/architecture-spark.md        active architecture and roadmap
+PROJECT_STATUS.md                 current project status
+hve/                              HVE application and HTTP service
+hermes-skills/hve-life-os/        canonical Hermes skill
+knowledge_base/                   non-personal Five Wealth templates
+tests/                            repository test suite
+deployment/mercury/               parked/experimental historical artifacts
+service/                          parked legacy Mercury service templates
 ```
 
-## Installation direction
+## Product direction
 
-The future installer will:
+The primary user experience is a local-first website/PWA. The CLI and TUI
+remain operator and power-user surfaces. Statoshi.info is dashboard
+UX/information-architecture inspiration, not a runtime dependency.
 
-1. Install a pinned Nous Hermes release or commit.
-2. Install or verify the ARM64 `llama.cpp` backend and Qwen GGUF model.
-3. Apply the HVE overlay and context-floor compatibility patch when needed.
-4. Install HVE Life OS files, services, health checks, and rollback metadata.
-5. Run a first-boot smoke test before enabling normal operation.
+Planned workflow:
 
-Do not install from an unpinned upstream branch in production. The exact
-upstream revision and model checksum belong in the deployment manifest.
+1. Contextual right-side dashboard chat.
+2. Advisor Teams transcript → reviewed Excel collector.
+3. Client import preview with consent and provenance.
+4. Local Five Wealth data workflow and scorecard.
 
-## Portability roadmap
+Excel trackers are initial scorecard and client-discovery interchange
+models, not a replacement for the local data store.
 
-| Target | Status | Direction |
-|---|---|---|
-| Mercury Raspberry Pi | Alpha | Minimum local profile |
-| Ubuntu on Windows | Planned | Reuse Linux installer and service contract |
-| macOS | Planned | Reuse overlay and local model API with platform service adapter |
+## Mercury status
 
-Platform-specific code must remain behind the deployment adapter. SQLite,
-Markdown, Hermes interfaces, data contracts, and application behavior should
-remain portable.
+Mercury Raspberry Pi artifacts are **parked/experimental**. Their files and
+technical history remain in the repository for reference, rollback, and
+future edge-adapter work; they are not the current Alpha v1 target. See
+[`deployment/mercury/README.md`](deployment/mercury/README.md),
+[`docs/runbook-mercury.md`](docs/runbook-mercury.md), and
+[`docs/rollback-mercury.md`](docs/rollback-mercury.md).
+
+## Development
+
+The project has no build system or deployment installer in this repository.
+When Python test dependencies are available, run the existing suite with:
+
+```bash
+python3 -m pytest -q
+```
+
+Do not commit personal data, credentials, model artifacts, or live runtime
+state. Do not commit or push changes made while reviewing the reference
+deployment.

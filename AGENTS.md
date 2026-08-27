@@ -100,3 +100,4 @@ visible, measurable, and actionable.
 - **Spark alpha** = active (this mission).
 - **Mercury** = **parked / experimental edge target** (files preserved, isolated).
 - See `PROJECT_STATUS.md` for the live task ledger.
+
